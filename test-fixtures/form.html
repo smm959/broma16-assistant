@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><title>form test</title>
+<style>.p-datepicker{display:none;border:1px solid #ccc;padding:6px}.p-dropdown-panel{display:none;border:1px solid #ccc}.p-datepicker.open,.p-dropdown-panel.open{display:block}</style>
+</head><body>
+<label>Название *<input placeholder="Название" id="f-title"></label>
+
+<div id="date_p_line" class="p-calendar">
+  <input placeholder="p-дата*" id="f-date" readonly>
+  <button type="button" id="date-btn">📅</button>
+  <div class="p-datepicker" id="date-panel">
+    <span class="p-yearpicker-year">2025</span>
+    <span class="p-yearpicker-year">2026</span>
+    <span class="p-yearpicker-year">2027</span>
+  </div>
+</div>
+
+<div id="genre_dd" class="p-dropdown">
+  <input id="f-genre" readonly placeholder="Жанры">
+  <span class="p-dropdown-label">Жанры</span>
+  <div class="p-dropdown-panel" id="genre-panel">
+    <ul><li role="option">Pop</li><li role="option">Rock</li><li role="option">Hip-Hop</li></ul>
+  </div>
+</div>
+
+<select id="f-type"><option value="">Тип релиза</option><option value="1">Альбом</option><option value="3">Сингл</option></select>
+
+<script>
+  const dp = document.getElementById('date-panel')
+  document.getElementById('date-btn').onclick = () => dp.classList.toggle('open')
+  dp.querySelectorAll('.p-yearpicker-year').forEach((el) => {
+    el.onclick = () => { document.getElementById('f-date').value = el.innerText.trim(); dp.classList.remove('open') }
+  })
+  const gp = document.getElementById('genre-panel')
+  document.getElementById('genre_dd').onclick = () => gp.classList.toggle('open')
+  gp.querySelectorAll('li').forEach((el) => {
+    el.onclick = () => { document.getElementById('f-genre').value = el.innerText.trim(); gp.classList.remove('open') }
+  })
+</script>
+</body></html>

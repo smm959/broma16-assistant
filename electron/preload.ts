@@ -102,6 +102,12 @@ const api = {
   browser: {
     open: (url?: string) => invoke('browser:open', url),
     read: () => invoke('browser:read'),
+    formFields: () => invoke('browser:form-fields'),
+    fillField: (target: any, value: string) => invoke('browser:fill-field', target, value),
+    chooseOption: (target: any, option: string) => invoke('browser:choose-option', target, option),
+    press: (key: string) => invoke('browser:press', key),
+    scroll: (y: number) => invoke('browser:scroll', y),
+    validationErrors: () => invoke('browser:validation-errors'),
     screenshot: () => invoke('browser:screenshot'),
     state: () => invoke('browser:state'),
     clear: () => invoke('browser:clear'),

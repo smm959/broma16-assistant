@@ -471,6 +471,7 @@ export class AgentOrchestrator {
         login: readSettings(this.deps.db).accountLogin ?? '',
         password: secrets().get('broma:password'),
       }),
+      vision: this.deps.vision,
     }
   }
 
@@ -572,6 +573,17 @@ export class AgentOrchestrator {
       if (placeholder?.placeholder_id) {
         this.deps.db.run(`UPDATE messages SET content = ? WHERE id = ?`, res.content, placeholder.placeholder_id)
       }
+      if (action.conversationId) {
+        this.deps.db.run(
+          `UPDATE messages SET content = ?
+           WHERE conversation_id = ? AND role = 'tool'
+             AND content LIKE 'Не выполнено: ожидает подтверждения%'
+             AND created_at >= ?`,
+          'Не выполнено: действие уже выполнено отдельно. Проверь результат через account_read и продолжай.',
+          action.conversationId,
+          Date.now() - 15 * 60_000,
+        )
+      }
       this.logActivity(action.conversationId, 'success', `Выполнено: ${action.title}`, {
         detail: res.content.slice(0, 400),
         tool: action.tool,
@@ -603,6 +615,19 @@ export class AgentOrchestrator {
         `UPDATE messages SET content = ? WHERE id = ?`,
         'ПОЛЬЗОВАТЕЛЬ ОТКЛОНИЛ ДЕЙСТВИЕ. Не выполняй его, предложи альтернативу.',
         placeholder.placeholder_id,
+      )
+    }
+    // Снимаем «зависшие» отложенные результаты того же шага, иначе модель видит
+    // «ожидает подтверждения» уже после отказа и снова останавливается.
+    if (row.conversation_id) {
+      this.deps.db.run(
+        `UPDATE messages SET content = ?
+         WHERE conversation_id = ? AND role = 'tool'
+           AND content LIKE 'Не выполнено: ожидает подтверждения%'
+           AND created_at >= ?`,
+        'Не выполнено: пользователь отклонил связанное действие. Продолжай без него.',
+        row.conversation_id,
+        Date.now() - 15 * 60_000,
       )
     }
     const action = this.mapAction(row)

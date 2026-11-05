@@ -1,6 +1,6 @@
 {
   "name": "broma16-assistant",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Broma 16 Assistant — персональный AI-агент для музыкальной дистрибуции, релизов и поддержки Broma 16",
   "main": "dist-electron/main.js",
   "author": "Music 959",

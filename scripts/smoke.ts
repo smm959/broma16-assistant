@@ -150,6 +150,23 @@ app.whenReady().then(async () => {
       `${loginFlow.note} :: ${loginFlow.steps.join('; ')}`,
     )
 
+    /* ---------------- формы: дамп, заполнение, календарь, дропдауны ---------------- */
+    await svc.browser.open('file://' + join(process.cwd(), 'test-fixtures', 'form.html'))
+    const formFields = (await svc.browser.formFields()) as any[]
+    check('account_form_fields видит поля', formFields.length >= 4 && formFields.some((f) => f.datepicker), `${formFields.length} полей`)
+    const filledTitle = await svc.browser.fillField('Название', 'ТОБОЙ НЕ ПОНЯТ')
+    check(
+      'account_fill возвращает подробности и подтверждает значение',
+      Boolean(filledTitle.ok && filledTitle.verified && filledTitle.after === 'ТОБОЙ НЕ ПОНЯТ' && filledTitle.field?.id === 'f-title'),
+      JSON.stringify({ after: filledTitle.after, id: filledTitle.field?.id }),
+    )
+    const filledDate = await svc.browser.fillField('date_p_line', '2026')
+    check('Дата выбирается через календарь', filledDate.ok && filledDate.after === '2026', filledDate.note)
+    const genre = await svc.browser.chooseOption('genre_dd', 'Pop')
+    check('account_select выбирает опцию кастомного дропдауна', genre.ok && genre.after === 'Pop', genre.note)
+    const native = await svc.browser.chooseOption('f-type', 'Сингл')
+    check('account_select работает с нативным select', native.ok && native.after === 'Сингл', native.note)
+
     /* ---------------- vision fallback ---------------- */
     const visionServer = createServer((req, res) => {
       req.resume()

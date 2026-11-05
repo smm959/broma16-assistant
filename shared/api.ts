@@ -120,6 +120,12 @@ export interface Api {
   browser: {
     open(url?: string): Promise<{ url: string; title: string }>
     read(): Promise<{ url: string; title: string; text: string; loggedIn: boolean; links: { text: string; href: string }[] }>
+    formFields(): Promise<any[]>
+    fillField(target: string | number, value: string): Promise<any>
+    chooseOption(target: string | number, option: string): Promise<any>
+    press(key: string): Promise<{ ok: boolean; note: string }>
+    scroll(y: number): Promise<{ ok: boolean; note: string }>
+    validationErrors(): Promise<string[]>
     screenshot(): Promise<{ path: string }>
     state(): Promise<BrowserAccountState>
     clear(): Promise<void>

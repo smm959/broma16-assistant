@@ -7,6 +7,7 @@ import type { SourceRef, AttachmentRef } from '../../shared/types.js'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, existsSync } from 'node:fs'
 import { autoLogin } from '../browser/login.js'
+import type { VisionService } from '../llm/vision.js'
 
 export type Risk = 'safe' | 'confirm'
 
@@ -19,6 +20,7 @@ export interface ToolContext {
   settings: () => Record<string, any>
   attachments: Map<string, AttachmentRef>
   accountCredentials: () => { login: string; password: string | null }
+  vision: VisionService
 }
 
 export interface ToolResult {
@@ -448,8 +450,27 @@ export const TOOLS: ToolDef[] = [
     parameters: obj({ max_chars: { type: 'number' } }),
     run: async (args, ctx) => {
       const r = await ctx.browser.read({ maxChars: Number(args.max_chars) || 20000 })
+      const fields = (await ctx.browser.formFields()) as any[]
+      const errors = await ctx.browser.validationErrors()
+      const visible = fields.filter((f) => f.visible && f.type !== 'hidden')
+      const fieldLines = visible
+        .map(
+          (f) =>
+            `- [${f.index}] ${f.tag}${f.datepicker ? ' (datepicker)' : ''} ${f.placeholder ? `ph="${f.placeholder}"` : ''} ${f.wrapper ? `wrapper=${f.wrapper}` : ''}${f.id ? ` id=${f.id}` : ''}${f.required ? ' *' : ''} = «${String(f.value).slice(0, 40)}»`,
+        )
+        .join('\n')
       return {
-        content: `URL: ${r.url}\nЗаголовок: ${r.title}\nВход выполнен: ${r.loggedIn ? 'похоже, да' : 'неизвестно'}\n\nТекст страницы:\n${r.text}\n\nСсылки:\n${r.links.slice(0, 40).map((l) => `- ${l.text} → ${l.href}`).join('\n')}`,
+        content: [
+          `URL: ${r.url}`,
+          `Заголовок: ${r.title}`,
+          `Вход выполнен: ${r.loggedIn ? 'да' : 'нет'}`,
+          r.text ? `\nТекст страницы:\n${r.text}` : '',
+          fieldLines ? `\nПоля формы (${visible.length}):\n${fieldLines}` : '',
+          errors.length ? `\nОшибки валидации:\n${errors.map((e) => `- ${e}`).join('\n')}` : '',
+          `\nСсылки:\n${r.links.slice(0, 25).map((l) => `- ${l.text} → ${l.href}`).join('\n')}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
         sources: [{ title: r.title || 'Личный кабинет Broma 16', url: r.url, kind: 'account', confidence: 'medium', verifiedAt: Date.now() }],
       }
     },
@@ -469,14 +490,98 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'account_fill',
-    description: 'Заполнить поле формы в личном кабинете. Обычные поля — без подтверждения; отправка формы (submit=true) требует подтверждения. Пароли и платёжные данные не заполнять без разрешения.',
+    description:
+      'Заполнить поле формы в кабинете. target — CSS-селектор, placeholder, id, wrapper-id (например date_p_line), подпись или номер поля из account_form_fields. Даты (p-calendar) выбираются через календарь автоматически. Возвращает, что именно заполнено (id/placeholder/было/стало).',
     risk: (a) => (a.submit ? 'confirm' : 'safe'),
-    parameters: obj({ selector: str('CSS-селектор поля'), value: str('Значение'), submit: { type: 'boolean' } }, ['selector', 'value']),
-    title: (a) => `Заполнить поле ${a.selector} в аккаунте`,
-    preview: (a) => ({ details: [{ label: 'Поле', value: String(a.selector) }, { label: 'Значение', value: String(a.value) }] }),
+    parameters: obj(
+      {
+        target: str('Селектор / placeholder / id / wrapper-id / подпись / номер поля'),
+        value: str('Значение (для года — 2026, для даты — 01.12.2026)'),
+        submit: { type: 'boolean', description: 'Отправить форму после заполнения (требует подтверждения)' },
+      },
+      ['target', 'value'],
+    ),
     run: async (args, ctx) => {
-      const r = await ctx.browser.fill(String(args.selector), String(args.value), Boolean(args.submit))
-      return { content: r.ok ? `Поле заполнено (${r.note}).` : `Не удалось: ${r.note}` }
+      if (args.submit) {
+        // submit оставлен для совместимости: заполняем, отправку делает account_click отдельно
+      }
+      const r = await ctx.browser.fillField(args.target as string | number, String(args.value))
+      if (!r.ok) {
+        const details = r.field
+          ? `Найдено поле: <${String(r.field.tagName ?? '').toLowerCase()}> id=${String(r.field.id ?? '—')} placeholder="${String(r.field.placeholder ?? '')}" wrapper=${String(r.field.wrapper ?? '—')}.`
+          : ''
+        const candidates = r.candidates?.length
+          ? `\nКандидаты:\n${(r.candidates as any[]).map((c) => `- [${c.index}] ${c.tag} ph="${c.placeholder}" id=${c.id || '—'}`).join('\n')}`
+          : ''
+        return { content: `${details}${details ? '\n' : ''}Не удалось: ${r.note}${candidates}\nПодсказка: вызови account_form_fields и укажи точный wrapper/id/placeholder.` }
+      }
+      const f = r.field ?? {}
+      return {
+        content: [
+          `Заполнено: <${String(f.tagName ?? '').toLowerCase()}> id=${f.id || '—'} name=${f.name || '—'} placeholder="${f.placeholder || ''}"${f.wrapper ? ` wrapper=${f.wrapper}` : ''}${r.datepicker ? ' (дата выбрана в календаре)' : ''}`,
+          `Было: «${r.before ?? ''}» → Стало: «${r.after ?? ''}»${r.verified ? ' ✓' : ' (не подтверждено)'}`,
+        ].join('\n'),
+        data: r,
+      }
+    },
+  },
+  {
+    name: 'account_form_fields',
+    description:
+      'Дамп всех полей формы: index, tag, type, id, placeholder, wrapper, required, disabled, видимость, значение, datepicker, варианты select. Нужен, чтобы не угадывать селекторы.',
+    risk: 'safe',
+    parameters: obj({}),
+    run: async (_a, ctx) => {
+      const fields = (await ctx.browser.formFields()) as any[]
+      const errors = await ctx.browser.validationErrors()
+      const visible = fields.filter((f) => f.visible)
+      const lines = visible.map((f) =>
+        [
+          `[${f.index}] ${f.tag}${f.type ? `/${f.type}` : ''}${f.datepicker ? ' datepicker' : ''}`,
+          f.placeholder ? `ph="${f.placeholder}"` : '',
+          f.wrapper ? `wrapper=${f.wrapper}` : '',
+          f.id ? `id=${f.id}` : '',
+          f.required ? 'required' : '',
+          f.readOnly ? 'readonly' : '',
+          `value=«${String(f.value).slice(0, 30)}»`,
+          f.options?.length ? `options=${JSON.stringify(f.options.slice(0, 8))}` : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      )
+      return {
+        content: `Полей: ${visible.length} из ${fields.length}\n${lines.join('\n')}${errors.length ? `\n\nОшибки валидации:\n${errors.map((e) => `- ${e}`).join('\n')}` : ''}`,
+      }
+    },
+  },
+  {
+    name: 'account_select',
+    description: 'Выбрать значение в выпадающем списке кабинета (нативный select или PrimeNG dropdown/autocomplete): «Тип релиза», «Жанры» и т.п.',
+    risk: 'safe',
+    parameters: obj({ target: str('Поле: wrapper-id/placeholder/подпись/номер'), option: str('Текст варианта') }, ['target', 'option']),
+    run: async (args, ctx) => {
+      const r = await ctx.browser.chooseOption(args.target as string | number, String(args.option))
+      return { content: r.ok ? `${r.note}` : `Не удалось: ${r.note}` }
+    },
+  },
+  {
+    name: 'account_scroll',
+    description: 'Прокрутить страницу кабинета вниз/вверх на N пикселей. Нужно для виртуализированных форм: часть полей появляется в DOM только после скролла.',
+    risk: 'safe',
+    parameters: obj({ delta_y: { type: 'number', description: 'Пиксели: +600 вниз, -600 вверх' } }, ['delta_y']),
+    run: async (args, ctx) => {
+      const r = await ctx.browser.scrollBy(Number(args.delta_y) || 600)
+      return { content: r.note }
+    },
+  },
+  {
+    name: 'account_press',
+    description: 'Нажать клавишу в кабинете: Enter/Tab/Escape/ArrowDown/ArrowUp/Backspace. Нужно для автокомплитов, тегов и закрытия подсказок.',
+    risk: 'safe',
+    parameters: obj({ key: str('Enter | Tab | Escape | ArrowDown | ArrowUp | Backspace') }, ['key']),
+    run: async (args, ctx) => {
+      const r = await ctx.browser.pressKey(String(args.key))
+      return { content: r.note }
     },
   },
   {
@@ -554,8 +659,28 @@ export const TOOLS: ToolDef[] = [
     risk: 'safe',
     parameters: obj({}),
     run: async (_a, ctx) => {
-      const r = await ctx.browser.screenshot()
-      return { content: `Скриншот сохранён: ${r.path}`, data: r }
+      const shot = await ctx.browser.screenshot()
+      const fields = (await ctx.browser.formFields()) as any[]
+      const visible = fields.filter((f) => f.visible && f.type !== 'hidden')
+      const dump = visible
+        .map((f) => `- [${f.index}] ${f.placeholder || f.wrapper || f.id || f.tag} = «${String(f.value).slice(0, 40)}»`)
+        .join('\n')
+      if (ctx.vision.config()) {
+        try {
+          const description = await ctx.vision.describeImage(
+            shot.path,
+            'image/png',
+            'Опиши страницу кабинета: что видно, какие поля заполнены, какие ошибки или подсказки показаны.',
+          )
+          return { content: `Скриншот (${shot.path}).\n\nЧто видно на странице:\n${description}\n\nПоля:\n${dump}`, data: shot }
+        } catch (e) {
+          return { content: `Скриншот сохранён: ${shot.path}\nНе удалось проанализировать изображение: ${(e as Error).message}\n\nПоля:\n${dump}`, data: shot }
+        }
+      }
+      return {
+        content: `Скриншот сохранён: ${shot.path} (модель без зрения).\nТекстовый дамп страницы:\n${dump}\n\nТекст: ${(await ctx.browser.read({ maxChars: 3000 })).text.slice(0, 1200)}`,
+        data: shot,
+      }
     },
   },
 

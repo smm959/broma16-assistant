@@ -344,6 +344,12 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
 
   handle('browser:open', (url?: string) => browser.open(url))
   handle('browser:read', () => browser.read())
+  handle('browser:form-fields', () => browser.formFields())
+  handle('browser:fill-field', (target: any, value: string) => browser.fillField(target, value))
+  handle('browser:choose-option', (target: any, option: string) => browser.chooseOption(target, option))
+  handle('browser:press', (key: string) => browser.pressKey(key))
+  handle('browser:scroll', (y: number) => browser.scrollBy(Number(y)))
+  handle('browser:validation-errors', () => browser.validationErrors())
   handle('browser:screenshot', () => browser.screenshot())
   handle('browser:state', () => browser.state())
   handle('browser:clear', () => browser.clearSession())
