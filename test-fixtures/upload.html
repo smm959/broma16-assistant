@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>upload test</title></head><body>
+<input type="file" id="cover" accept="image/*">
+<input type="file" id="audio" accept="audio/*" multiple>
+<div id="out"></div>
+<script>
+  for (const el of document.querySelectorAll('input[type=file]')) {
+    el.addEventListener('change', () => {
+      const names = [...document.querySelectorAll('input[type=file]')].flatMap(x => [...x.files].map(f => f.name));
+      document.getElementById('out').textContent = names.join(',');
+    });
+  }
+</script></body></html>

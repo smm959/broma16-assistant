@@ -1,8 +1,6 @@
 import type { ModelInfo, ProviderConnection, ProviderId } from '../../shared/types.js'
 import { LlmError, type ChatRequest, type ChatResult, type LlmAdapter } from './types.js'
-import { AnthropicAdapter } from './providers/anthropic.js'
-import { GeminiAdapter } from './providers/gemini.js'
-import { OpenAiCompatibleAdapter } from './providers/openai.js'
+import { adapterFor } from './adapters.js'
 import { modelInfo, presetFor, PROVIDERS } from './presets.js'
 import { secrets } from '../security/secrets.js'
 import type { Db } from '../db/index.js'
@@ -84,20 +82,7 @@ export class ProviderManager {
   }
 
   private adapter(provider: ProviderId): LlmAdapter {
-    switch (provider) {
-      case 'openai':
-        return new OpenAiCompatibleAdapter('openai')
-      case 'deepseek':
-        return new OpenAiCompatibleAdapter('deepseek')
-      case 'compatible':
-        return new OpenAiCompatibleAdapter('compatible')
-      case 'anthropic':
-        return new AnthropicAdapter()
-      case 'gemini':
-        return new GeminiAdapter()
-      default:
-        throw new LlmError(`Провайдер ${provider} пока не поддерживается.`, 'unsupported')
-    }
+    return adapterFor(provider)
   }
 
   baseUrlFor(provider: ProviderId, custom?: string) {

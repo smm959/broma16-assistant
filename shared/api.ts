@@ -17,6 +17,7 @@ import type {
   ProviderId,
   Release,
   Ticket,
+  VisionState,
 } from './types'
 
 export interface SendResult {
@@ -34,6 +35,12 @@ export interface Api {
     test(input?: { provider?: ProviderId; model?: string; apiKey?: string; baseUrl?: string }): Promise<{ ok: boolean; models?: string[]; error?: string }>
     models(provider: ProviderId, baseUrl?: string): Promise<string[]>
     disconnect(): Promise<void>
+  }
+  vision: {
+    get(): Promise<VisionState | null>
+    save(input: { provider: ProviderId; model: string; apiKey?: string; baseUrl?: string }): Promise<VisionState>
+    test(): Promise<{ ok: boolean; error?: string; sample?: string }>
+    clear(): Promise<void>
   }
   conv: {
     list(): Promise<Conversation[]>

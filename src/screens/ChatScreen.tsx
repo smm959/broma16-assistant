@@ -36,6 +36,15 @@ export default function ChatScreen({
   const [currentActivity, setCurrentActivity] = React.useState<string>()
   const [showConvs, setShowConvs] = React.useState(true)
   const [dragOver, setDragOver] = React.useState(false)
+  const [visionCfg, setVisionCfg] = React.useState<any>(null)
+
+  const modelMeta = app.boot?.providers.flatMap((p) => p.models).find((m) => m.id === connection?.model)
+  const primaryVision = Boolean(modelMeta?.supportsVision)
+  const hasImages = attachments.some((a) => a.kind === 'image')
+
+  React.useEffect(() => {
+    if (hasImages) void window.api.vision.get().then(setVisionCfg)
+  }, [hasImages])
 
   const convRef = React.useRef(conversationId)
   convRef.current = conversationId
@@ -325,7 +334,7 @@ export default function ChatScreen({
                     {a.kind === 'image' && a.path ? (
                       <img src={`attachment://local${encodeURI(a.path)}`} alt="" />
                     ) : (
-                      <div className="att-ico"><Icon name="paperclip" size={13} /></div>
+                      <div className="att-ico"><Icon name={a.kind === 'audio' ? 'audio' : 'paperclip'} size={13} /></div>
                     )}
                     <span className="att-name" style={{ maxWidth: 140 }}>{a.filename}</span>
                     <button className="icon-btn" style={{ width: 20, height: 20 }} onClick={() => setAttachments((x) => x.filter((y) => y.id !== a.id))}>
@@ -360,6 +369,15 @@ export default function ChatScreen({
                 }
               }}
             />
+            {hasImages && !primaryVision && !visionCfg && (
+              <div className="banner" style={{ margin: '6px 0 4px', padding: '8px 10px' }}>
+                <Icon name="image" size={14} />
+                <div className="grow" style={{ fontSize: 11.6 }}>
+                  Модель {connection?.model ?? ''} не видит изображения. Подключите vision-модель — она опишет картинку.
+                </div>
+                <button className="btn btn-sm" onClick={() => app.setScreen('settings')}>Настроить</button>
+              </div>
+            )}
             <div className="composer-row">
               <button className="icon-btn" title="Прикрепить файл" onClick={async () => { const picked = await window.api.attachment.pick(); setAttachments((a) => [...a, ...picked]) }}>
                 <Icon name="paperclip" size={17} />

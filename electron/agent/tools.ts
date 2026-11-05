@@ -440,6 +440,75 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'account_file_inputs',
+    description:
+      'Показать поля загрузки файлов (input[type=file]) на открытой странице кабинета: номер, accept, multiple, видимость, подпись. Нужно, чтобы понять, куда прикладывать обложку и WAV.',
+    risk: 'safe',
+    parameters: obj({}),
+    run: async (_a, ctx) => {
+      const inputs = await ctx.browser.listFileInputs()
+      if (!inputs.length) {
+        return {
+          content:
+            'На текущей странице нет полей загрузки файлов. Возможно, нужен другой раздел — прочитай страницу (account_read) и перейди в форму создания релиза.',
+        }
+      }
+      return {
+        content: inputs
+          .map(
+            (i) =>
+              `- поле №${i.index}: accept="${i.accept ?? ''}", multiple=${i.multiple ? 'да' : 'нет'}, ${i.visible ? 'видимое' : 'скрытое (открывается кнопкой)'}${i.hint ? `, подпись: ${i.hint}` : ''}`,
+          )
+          .join('\n'),
+      }
+    },
+  },
+  {
+    name: 'account_upload_files',
+    description:
+      'Прикрепить файлы из вложений диалога (обложка, WAV, документы) в поле загрузки личного кабинета. Работает с обычными и скрытыми input[type=file]. Требует подтверждения пользователя. Перед вызовом проверь поля через account_file_inputs.',
+    risk: 'confirm',
+    parameters: obj(
+      {
+        attachment_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'id вложений из текущего диалога (из сообщения пользователя)',
+        },
+        input_index: { type: 'number', description: 'Номер поля загрузки (по умолчанию 0)' },
+      },
+      ['attachment_ids'],
+    ),
+    title: (a) => `Прикрепить файлы в Broma 16 (${Array.isArray(a.attachment_ids) ? a.attachment_ids.length : 0} шт.)`,
+    preview: (a, ctx) => {
+      const ids: string[] = Array.isArray(a.attachment_ids) ? (a.attachment_ids as string[]) : []
+      const files = ids.map((id) => ctx.attachments.get(id)).filter(Boolean)
+      return {
+        details: [
+          { label: 'Файлы', value: files.map((f) => `${f!.filename} (${Math.round(f!.size / 1024)} КБ)`).join(', ') || '—' },
+          { label: 'Поле', value: `№${Number(a.input_index) || 0}` },
+        ],
+      }
+    },
+    run: async (args, ctx) => {
+      const ids: string[] = Array.isArray(args.attachment_ids) ? (args.attachment_ids as string[]).map(String) : []
+      const files = ids.map((id) => ctx.attachments.get(id)).filter((f): f is NonNullable<typeof f> => Boolean(f?.path))
+      if (!files.length) {
+        return {
+          content:
+            'Не найдены вложения с файлами. Попроси пользователя прикрепить обложку/WAV к сообщению в чате (скрепка или drag&drop).',
+        }
+      }
+      const index = Math.max(0, Number(args.input_index) || 0)
+      const res = await ctx.browser.uploadFiles(index, files.map((f) => f.path!))
+      if (!res.ok) return { content: `Не удалось прикрепить файлы: ${res.note}` }
+      return {
+        content: `Файлы прикреплены в поле №${index}: ${(res.files ?? []).map((f) => f.name).join(', ')}. Дальше проверь остальные поля и НЕ отправляй форму без подтверждения.`,
+        data: res,
+      }
+    },
+  },
+  {
     name: 'account_screenshot',
     description: 'Сделать скриншот текущей страницы личного кабинета и сохранить локально.',
     risk: 'safe',

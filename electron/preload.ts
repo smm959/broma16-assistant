@@ -19,6 +19,12 @@ const api = {
     models: (provider: string, baseUrl?: string) => invoke('provider:models', provider, baseUrl),
     disconnect: () => invoke('provider:disconnect'),
   },
+  vision: {
+    get: () => invoke('vision:get'),
+    save: (input: any) => invoke('vision:save', input),
+    test: () => invoke('vision:test'),
+    clear: () => invoke('vision:clear'),
+  },
   conv: {
     list: () => invoke('conv:list'),
     create: () => invoke('conv:create'),

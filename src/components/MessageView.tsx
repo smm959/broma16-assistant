@@ -11,7 +11,7 @@ export function AttachmentList({ attachments }: { attachments: NonNullable<ChatM
           {a.kind === 'image' && a.path ? (
             <img src={`attachment://local${encodeURI(a.path)}`} alt={a.filename} />
           ) : (
-            <div className="att-ico"><Icon name="image" size={16} /></div>
+            <div className="att-ico"><Icon name={a.kind === 'audio' ? 'audio' : 'image'} size={16} /></div>
           )}
           <div style={{ minWidth: 0 }}>
             <div className="att-name">{a.filename}</div>

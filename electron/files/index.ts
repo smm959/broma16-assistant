@@ -6,6 +6,7 @@ import type { AttachmentRef } from '../../shared/types.js'
 
 const TEXT_EXT = new Set(['.txt', '.md', '.csv', '.json', '.log', '.srt', '.rtf'])
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
+const AUDIO_EXT = new Set(['.wav', '.mp3', '.aiff', '.aif', '.flac', '.m4a', '.ogg'])
 
 export const MIME_BY_EXT: Record<string, string> = {
   '.png': 'image/png',
@@ -24,6 +25,11 @@ export const MIME_BY_EXT: Record<string, string> = {
   '.json': 'application/json',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.aiff': 'audio/aiff',
+  '.aif': 'audio/aiff',
+  '.m4a': 'audio/mp4',
+  '.ogg': 'audio/ogg',
 }
 
 export class FileService {
@@ -39,7 +45,8 @@ export class FileService {
     const path = join(dir, sanitizeName(filename) || `file${ext}`)
     writeFileSync(path, data)
     const mime = MIME_BY_EXT[ext] ?? 'application/octet-stream'
-    const kind: 'image' | 'document' = IMAGE_EXT.has(ext) || mime.startsWith('image/') ? 'image' : 'document'
+    const kind: 'image' | 'document' | 'audio' =
+      IMAGE_EXT.has(ext) || mime.startsWith('image/') ? 'image' : AUDIO_EXT.has(ext) || mime.startsWith('audio/') ? 'audio' : 'document'
     const ref: AttachmentRef = { id, filename, mimeType: mime, size: data.byteLength, kind, path }
     if (kind === 'document') {
       try {

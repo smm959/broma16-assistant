@@ -159,6 +159,81 @@ export class BrowserAutomation {
     return { path }
   }
 
+  /**
+   * Список полей загрузки файлов на текущей странице (input[type=file]).
+   * Нужен агенту, чтобы понять, куда прикладывать обложку и WAV.
+   */
+  async listFileInputs(): Promise<
+    { index: number; accept?: string; multiple: boolean; visible: boolean; hint?: string }[]
+  > {
+    const win = this.ensureWindow(false)
+    if (win.webContents.isLoading()) {
+      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
+    }
+    return win.webContents.executeJavaScript(
+      `(() => [...document.querySelectorAll('input[type=file]')].map((el, index) => {
+        const rect = el.getBoundingClientRect()
+        const label = el.closest('label')?.innerText || el.getAttribute('aria-label') || el.name || el.id || ''
+        return {
+          index,
+          accept: el.accept || '',
+          multiple: !!el.multiple,
+          visible: rect.width > 0 && rect.height > 0,
+          hint: String(label).replace(/\s+/g, ' ').trim().slice(0, 120),
+        }
+      }))()`,
+      true,
+    )
+  }
+
+  /**
+   * Реальная загрузка файлов в поле формы через CDP (DOM.setFileInputFiles).
+   * Работает и с невидимыми input[type=file], которые открываются кнопкой «Выбрать файл».
+   */
+  async uploadFiles(
+    index: number,
+    paths: string[],
+  ): Promise<{ ok: boolean; note: string; files?: { name: string; size: number }[] }> {
+    if (!paths.length) return { ok: false, note: 'Не переданы файлы' }
+    const win = this.ensureWindow(false)
+    if (win.webContents.isLoading()) {
+      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
+    }
+    const dbg = win.webContents.debugger
+    try {
+      if (!dbg.isAttached()) dbg.attach('1.3')
+      await dbg.sendCommand('DOM.enable').catch(() => undefined)
+      await dbg.sendCommand('Runtime.enable').catch(() => undefined)
+      await dbg.sendCommand('DOM.getDocument', { depth: -1 }).catch(() => undefined)
+      const evaluated = (await dbg.sendCommand('Runtime.evaluate', {
+        expression: `document.querySelectorAll('input[type=file]')[${index}] || null`,
+        returnByValue: false,
+      })) as { result?: { objectId?: string } }
+      const objectId = evaluated?.result?.objectId
+      if (!objectId) return { ok: false, note: `Поле загрузки №${index} не найдено на странице` }
+      const requested = (await dbg.sendCommand('DOM.requestNode', { objectId })) as { nodeId?: number }
+      if (!requested?.nodeId) return { ok: false, note: 'Не удалось получить узел поля загрузки' }
+      await dbg.sendCommand('DOM.setFileInputFiles', { files: paths, nodeId: requested.nodeId })
+      const files = (await win.webContents.executeJavaScript(
+        `(() => { const el = document.querySelectorAll('input[type=file]')[${index}]; return el ? [...el.files].map(f => ({ name: f.name, size: f.size })) : [] })()`,
+        true,
+      )) as { name: string; size: number }[]
+      return {
+        ok: files.length > 0,
+        note: files.length ? `Прикреплено файлов: ${files.length}` : 'Браузер не подтвердил прикрепление файлов',
+        files,
+      }
+    } catch (e) {
+      return { ok: false, note: `Ошибка загрузки: ${(e as Error).message}` }
+    } finally {
+      try {
+        if (dbg.isAttached()) dbg.detach()
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   state(): BrowserAccountState {
     return {
       loggedIn: /dashboard|account|release|личный кабинет/i.test(this.lastUrl),

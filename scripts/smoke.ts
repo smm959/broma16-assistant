@@ -69,6 +69,51 @@ app.whenReady().then(async () => {
       check(`Разбор ${name}`, Boolean(ref.extractedText && ref.extractedText.length > 10), ref.extractedText?.slice(0, 60).replace(/\s+/g, ' '))
     }
 
+    /* ---------------- аудио и загрузка файлов ---------------- */
+    const wavRef = await files.saveUpload('sample.wav', new Uint8Array(require('node:fs').readFileSync(join(process.cwd(), 'test-fixtures', 'sample.wav'))))
+    check('WAV распознан как аудио', wavRef.kind === 'audio' && wavRef.mimeType === 'audio/wav', `${wavRef.kind}/${wavRef.mimeType}`)
+
+    await svc.browser.open('file://' + join(process.cwd(), 'test-fixtures', 'upload.html'))
+    const inputs = await svc.browser.listFileInputs()
+    check('Поля загрузки найдены', inputs.length === 2 && inputs[1]?.accept === 'audio/*', JSON.stringify(inputs))
+
+    const uploaded = await svc.browser.uploadFiles(1, [join(process.cwd(), 'test-fixtures', 'sample.wav')])
+    check(
+      'Файл прикреплён через CDP в input[type=file]',
+      uploaded.ok && uploaded.files?.[0]?.name === 'sample.wav',
+      JSON.stringify(uploaded.files ?? uploaded.note),
+    )
+
+    const { toolMap: tools2 } = await import('../electron/agent/tools.js')
+    const uploadTool = tools2().get('account_upload_files')!
+    const attMap = new Map([[wavRef.id, wavRef]])
+    const upRes = await uploadTool.run(
+      { attachment_ids: [wavRef.id], input_index: 1 },
+      { ...ctx, attachments: attMap } as any,
+    )
+    check('Инструмент account_upload_files работает', /прикреплены/i.test(upRes.content), upRes.content.slice(0, 90))
+
+    /* ---------------- vision fallback ---------------- */
+    const visionServer = createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        const send = (o: unknown) => res.write(`data: ${JSON.stringify(o)}\n\n`)
+        send({ choices: [{ delta: { content: 'На изображении обложка релиза: тёмный фон, лаймовый круг, буква B.' } }] })
+        send({ choices: [{ delta: {}, finish_reason: 'stop' }] })
+        res.write('data: [DONE]\n\n')
+        res.end()
+      })
+    })
+    await new Promise<void>((r) => visionServer.listen(0, '127.0.0.1', r))
+    const visionPort = (visionServer.address() as any).port
+    svc.vision.save({ provider: 'compatible', model: 'vision-test', apiKey: 'sk-vision', baseUrl: `http://127.0.0.1:${visionPort}/v1` })
+    const description = await svc.vision.describeImage(join(process.cwd(), 'resources', 'icon.png'), 'image/png', 'что это?')
+    check('Vision-модель описывает картинку', description.includes('обложка'), description.slice(0, 80))
+    const visionTest = await svc.vision.test()
+    check('Проверка vision-подключения', visionTest.ok, visionTest.sample ?? visionTest.error)
+    visionServer.close()
+
     /* ---------------- LLM стриминг + tool calls ---------------- */
     let callIndex = 0
     const server = createServer((req, res) => {

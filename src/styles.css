@@ -102,7 +102,7 @@ a:hover { text-decoration: underline; }
 .btn-danger:hover { background: #2c181a; }
 .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
 .btn-lg { height: 40px; padding: 0 18px; font-size: 13.5px; }
-.icon-btn { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+.icon-btn { width: 30px; height: 30px; border-radius: 8px; display: inline-grid; place-items: center; color: var(--muted); vertical-align: middle; }
 .icon-btn:hover { background: var(--panel-3); color: var(--text); }
 
 /* ------------------------------- workspace ------------------------------- */

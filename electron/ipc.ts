@@ -37,6 +37,31 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
   handle('settings:save', (patch: Record<string, unknown>) => normalizeSettings(svc.saveSettings(patch)))
 
   handle('provider:save', async (input: any) => llm.saveConnection(input))
+
+  handle('vision:get', () => {
+    const cfg = svc.vision.config()
+    if (!cfg) return null
+    return {
+      provider: cfg.provider,
+      model: cfg.model,
+      hasKey: svc.vision.hasKey(cfg.provider),
+      keyHint: svc.vision.hint(cfg.provider),
+      updatedAt: cfg.updatedAt,
+    }
+  })
+  handle('vision:save', (input: any) => {
+    const cfg = svc.vision.save(input)
+    return {
+      provider: cfg.provider,
+      model: cfg.model,
+      hasKey: svc.vision.hasKey(cfg.provider),
+      keyHint: svc.vision.hint(cfg.provider),
+      updatedAt: cfg.updatedAt,
+    }
+  })
+  handle('vision:test', () => svc.vision.test())
+  handle('vision:clear', () => svc.vision.clear())
+
   handle('provider:test', async (input: any) => llm.testConnection(input))
   handle('provider:models', async (provider: ProviderId, baseUrl?: string) => llm.listModels(provider, baseUrl))
   handle('provider:disconnect', async () => llm.disconnect())
@@ -74,7 +99,7 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
       title: 'Прикрепить файлы',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: 'Все поддерживаемые', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf', 'txt', 'md', 'docx', 'xlsx', 'csv', 'json'] },
+        { name: 'Все поддерживаемые', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf', 'txt', 'md', 'docx', 'xlsx', 'csv', 'json', 'wav', 'mp3', 'aiff', 'flac', 'm4a'] },
         { name: 'Все файлы', extensions: ['*'] },
       ],
     })

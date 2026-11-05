@@ -7,6 +7,7 @@ import type { KnowledgeBase } from '../kb/index.js'
 import type { EmailService } from '../email/index.js'
 import type { BrowserAutomation } from '../browser/automation.js'
 import type { FileService } from '../files/index.js'
+import type { VisionService } from '../llm/vision.js'
 import type {
   ActivityEvent,
   AttachmentRef,
@@ -25,6 +26,7 @@ export interface AgentDeps {
   email: EmailService
   browser: BrowserAutomation
   files: FileService
+  vision: VisionService
 }
 
 export interface AgentEvents {
@@ -233,7 +235,7 @@ export class AgentOrchestrator {
 
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
-        const messages = this.buildHistory(conversationId)
+        const messages = await this.buildHistory(conversationId)
         const system = buildSystemPrompt(
           this.deps.db,
           this.deps.kb.status(),
@@ -352,7 +354,7 @@ export class AgentOrchestrator {
 
   private lastSources: SourceRef[] = []
 
-  private buildHistory(conversationId: string): LlmMessage[] {
+  private async buildHistory(conversationId: string): Promise<LlmMessage[]> {
     const rows = this.deps.db.all<any>(
       `SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?`,
       conversationId,
@@ -389,9 +391,16 @@ export class AgentOrchestrator {
         .filter((a) => a.kind === 'document' && a.extractedText)
         .map((a) => `\n\n[Вложение «${a.filename}»]\n${String(a.extractedText).slice(0, 12_000)}`)
         .join('')
+      const audioText = atts
+        .filter((a) => a.kind === 'audio')
+        .map(
+          (a) =>
+            `\n\n[Аудиофайл «${a.filename}» приложен. Его можно прикрепить в кабинет инструментом account_upload_files (attachment_id: ${a.id}).]`,
+        )
+        .join('')
 
       if (imageParts.length && this.deps.llm.supportsVision()) {
-        const parts: any[] = [{ type: 'text', text: content + docText }]
+        const parts: any[] = [{ type: 'text', text: content + docText + audioText }]
         for (const img of imageParts.slice(0, 4)) {
           try {
             const b64 = this.deps.files.base64ForVision(img.path!)
@@ -402,13 +411,45 @@ export class AgentOrchestrator {
         }
         out.push({ role: 'user', content: parts })
       } else {
-        const imageNote = atts.some((a) => a.kind === 'image')
-          ? '\n\n[Пользователь приложил изображение, но выбранная модель не поддерживает анализ изображений. Сообщи об этом и предложи переключиться на мультимодальную модель.]'
-          : ''
-        out.push({ role: 'user', content: content + docText + imageNote })
+        const visionText = await this.describeImages(atts, recentUserIds.includes(r.id), content)
+        out.push({ role: 'user', content: content + docText + audioText + visionText })
       }
     }
     return out
+  }
+
+  /**
+   * Если основная модель текстовая (DeepSeek), изображения описывает отдельная
+   * vision-модель, а результат кэшируется в chat_attachments.extracted_text.
+   */
+  private async describeImages(atts: AttachmentRef[], allowNew: boolean, hint: string): Promise<string> {
+    const images = atts.filter((a) => a.kind === 'image' && a.path)
+    if (!images.length) return ''
+    const chunks: string[] = []
+    for (const img of images.slice(0, 4)) {
+      const cached = (img.extractedText ?? '').trim()
+      if (cached.length > 20) {
+        chunks.push(`[Изображение «${img.filename}»]\n${cached.slice(0, 3000)}`)
+        continue
+      }
+      if (!allowNew) continue
+      const vision = this.deps.vision
+      if (!vision.config()) {
+        chunks.push(
+          `[Изображение «${img.filename}»: анализ недоступен — vision-модель не подключена. Скажи пользователю открыть «Настройки → AI → Анализ изображений» и подключить Gemini/OpenAI/Claude. WAV и файлы при этом можно прикреплять в кабинет.]`,
+        )
+        continue
+      }
+      try {
+        const text = await vision.describeImage(img.path!, img.mimeType, hint)
+        this.deps.db.run(`UPDATE chat_attachments SET extracted_text = ? WHERE id = ?`, text.slice(0, 8000), img.id)
+        chunks.push(`[Изображение «${img.filename}», анализ vision-модели]\n${text.slice(0, 3000)}`)
+        this.logActivity(undefined, 'success', `Проанализировал изображение «${img.filename}»`, { tool: 'vision' })
+      } catch (e) {
+        chunks.push(`[Не удалось проанализировать изображение «${img.filename}»: ${(e as Error).message}]`)
+      }
+    }
+    return chunks.length ? '\n\n' + chunks.join('\n\n') : ''
   }
 
   private toolContext(conversationId: string): ToolContext {

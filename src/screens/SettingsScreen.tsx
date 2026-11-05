@@ -3,6 +3,8 @@ import type { AppSettings, EmailAccount } from '@shared/types'
 import { useApp } from '../store'
 import { Icon, Field, Badge, Spinner } from '../components/ui'
 import { fmtDate } from '../lib/format'
+import VisionModal from '../components/VisionModal'
+import type { VisionState } from '@shared/types'
 
 const SECTIONS = [
   ['ai', 'AI и модели'],
@@ -20,10 +22,13 @@ export default function SettingsScreen() {
   const [accounts, setAccounts] = React.useState<EmailAccount[]>([])
   const [saved, setSaved] = React.useState(false)
   const [browserState, setBrowserState] = React.useState<any>(null)
+  const [vision, setVision] = React.useState<VisionState | null>(null)
+  const [visionOpen, setVisionOpen] = React.useState(false)
 
   React.useEffect(() => {
     void window.api.email.accounts().then(setAccounts)
     void window.api.browser.state().then(setBrowserState)
+    void window.api.vision.get().then(setVision)
   }, [])
 
   const saveProfile = async () => {
@@ -86,6 +91,34 @@ export default function SettingsScreen() {
                     </>
                   )}
                 </div>
+                <div className="hr" />
+                <h3>Анализ изображений</h3>
+                <p className="sub">
+                  Обложки, скриншоты кабинета и статистики. Если основная модель текстовая (DeepSeek), здесь нужна
+                  мультимодальная модель — она опишет картинку, и агент продолжит работу.
+                </p>
+                <div className="card card-pad">
+                  {vision ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <Badge tone="green">подключено</Badge>
+                      <b style={{ fontSize: 13 }}>{vision.model}</b>
+                      <span style={{ color: 'var(--muted)', fontSize: 12 }}>· {vision.provider}</span>
+                      <span style={{ color: 'var(--muted)', fontSize: 12 }}>· ключ {vision.keyHint ?? '—'}</span>
+                      <div style={{ flex: 1 }} />
+                      <button className="btn btn-sm" onClick={() => setVisionOpen(true)}>Изменить</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span style={{ color: 'var(--text-2)', fontSize: 12.6, flex: 1 }}>
+                        Не подключено — картинки пока не анализируются.
+                      </span>
+                      <button className="btn btn-primary btn-sm" onClick={() => setVisionOpen(true)}>
+                        <Icon name="image" size={14} /> Подключить vision-модель
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="hr" />
                 <h3>База знаний</h3>
                 <p className="sub">{app.knowledge?.articles ?? 0} статей · синхронизация {app.knowledge?.lastSync ? fmtDate(app.knowledge.lastSync, true) : 'не выполнялась'}</p>
@@ -249,6 +282,18 @@ export default function SettingsScreen() {
           </div>
         </div>
       </div>
+
+      {visionOpen && (
+        <VisionModal
+          current={vision}
+          presets={app.boot?.providers ?? []}
+          onClose={() => setVisionOpen(false)}
+          onSaved={(v) => {
+            setVision(v)
+            void window.api.vision.get().then(setVision)
+          }}
+        />
+      )}
     </div>
   )
 }

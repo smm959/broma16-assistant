@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { Db } from './db/index.js'
 import { KnowledgeBase } from './kb/index.js'
 import { ProviderManager } from './llm/manager.js'
+import { VisionService } from './llm/vision.js'
 import { EmailService } from './email/index.js'
 import { BrowserAutomation } from './browser/automation.js'
 import { FileService } from './files/index.js'
@@ -15,6 +16,7 @@ export interface Services {
   email: EmailService
   browser: BrowserAutomation
   files: FileService
+  vision: VisionService
   agent: AgentOrchestrator
   settings(): Record<string, string>
   saveSettings(patch: Record<string, unknown>): Record<string, string>
@@ -44,6 +46,7 @@ export function buildServices(emit: (channel: string, payload: unknown) => void)
   const llm = new ProviderManager(db)
   const email = new EmailService(db)
   const browser = new BrowserAutomation(userData)
+  const vision = new VisionService(db)
 
   const settings = () => {
     const rows = db.all<{ key: string; value: string }>(`SELECT key, value FROM settings`)
@@ -74,11 +77,11 @@ export function buildServices(emit: (channel: string, payload: unknown) => void)
     conversations: () => emit('event:conversations', {}),
   }
 
-  const agent = new AgentOrchestrator({ db, llm, kb, email, browser, files }, events)
+  const agent = new AgentOrchestrator({ db, llm, kb, email, browser, files, vision }, events)
 
   kb.onStatus((s) => emit('event:kb-status', s))
   kb.seed()
   kb.index.rebuild()
 
-  return { db, kb, llm, email, browser, files, agent, settings, saveSettings, emit }
+  return { db, kb, llm, email, browser, files, vision, agent, settings, saveSettings, emit }
 }

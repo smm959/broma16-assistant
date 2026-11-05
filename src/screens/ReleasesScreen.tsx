@@ -51,6 +51,22 @@ export default function ReleasesScreen() {
     }
   }
 
+  const uploadToPortal = async (r: Release) => {
+    const c = await window.api.conv.create()
+    app.setScreen('chat')
+    app.setConversationId(c.id)
+    await window.api.chat.send({
+      conversationId: c.id,
+      text: [
+        `Загружаем релиз «${r.title}» в личный кабинет Broma 16.`,
+        `Данные: артист — ${r.artist || 'не указан'}, дата релиза — ${r.releaseDate || 'не указана'}, UPC/EAN — ${r.upc || 'нет'}, ISRC — ${r.isrc || 'нет'}.`,
+        'Открой кабинет, помоги мне войти, покажи форму создания релиза и поля загрузки файлов (account_file_inputs).',
+        'Я пришлю обложку и WAV в чат — прикрепи их через account_upload_files. Заполняй поля по шагам и ничего не отправляй без моего подтверждения.',
+      ].join(' '),
+    })
+    app.refreshConversations()
+  }
+
   const importFromAccount = async () => {
     const c = await window.api.conv.create()
     app.setScreen('chat')
@@ -106,6 +122,7 @@ export default function ReleasesScreen() {
                     </Badge>
                   </td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="icon-btn" title="Загрузить в Broma 16" onClick={() => uploadToPortal(r)}><Icon name="external" size={14} /></button>
                     <button className="icon-btn" title="Редактировать" onClick={() => setEditing(r)}><Icon name="edit" size={14} /></button>
                     <button
                       className="icon-btn"

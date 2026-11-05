@@ -9,6 +9,8 @@ export const PROVIDERS: ProviderPreset[] = [
     docsUrl: 'https://platform.deepseek.com/api_keys',
     keyPlaceholder: 'sk-…',
     models: [
+      { id: 'deepseek-flash', label: 'DeepSeek Flash (vision)', supportsTools: true, supportsVision: true, kind: 'chat', contextWindow: 131072 },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', supportsTools: true, supportsVision: false, kind: 'chat', contextWindow: 131072 },
       { id: 'deepseek-chat', label: 'DeepSeek Chat (V3)', supportsTools: true, supportsVision: false, kind: 'chat', contextWindow: 131072 },
       { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1)', supportsTools: false, supportsVision: false, kind: 'reasoning', contextWindow: 131072 },
     ],

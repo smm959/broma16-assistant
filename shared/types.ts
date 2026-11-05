@@ -36,6 +36,14 @@ export interface ProviderConnection {
   updatedAt: number
 }
 
+export interface VisionState {
+  provider: ProviderId
+  model: string
+  hasKey: boolean
+  keyHint?: string
+  updatedAt: number
+}
+
 export interface AppSettings {
   language: 'ru'
   userName: string
@@ -58,7 +66,7 @@ export interface AttachmentRef {
   filename: string
   mimeType: string
   size: number
-  kind: 'image' | 'document'
+  kind: 'image' | 'document' | 'audio'
   /** локальный путь в app data */
   path?: string
   /** текстовое извлечение / OCR для документов */
