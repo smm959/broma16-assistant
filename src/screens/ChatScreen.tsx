@@ -202,6 +202,14 @@ export default function ChatScreen({
   const reject = async (id: string) => {
     await window.api.actions.reject(id)
   }
+  const dismiss = async (id: string) => {
+    const res = await window.api.actions.dismiss(id)
+    if (!res.ok) {
+      app.toast(res.error ?? 'Не удалось закрыть задачу', 'error')
+      return
+    }
+    setActions((prev) => prev.filter((a) => a.id !== id))
+  }
 
   return (
     <div className={`workspace ${activityOpen ? '' : 'no-activity'} ${showConvs ? '' : 'no-convs'}`}>
@@ -305,10 +313,10 @@ export default function ChatScreen({
             {(pending.length > 0 || recentActions.length > 0) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {pending.map((a) => (
-                  <ActionCard key={a.id} action={a} onApprove={() => approve(a.id)} onReject={() => reject(a.id)} />
+                  <ActionCard key={a.id} action={a} onApprove={() => approve(a.id)} onReject={() => reject(a.id)} onDismiss={() => dismiss(a.id)} />
                 ))}
                 {recentActions.map((a) => (
-                  <ActionCard key={a.id} action={a} onApprove={() => approve(a.id)} onReject={() => reject(a.id)} />
+                  <ActionCard key={a.id} action={a} onApprove={() => approve(a.id)} onReject={() => reject(a.id)} onDismiss={() => dismiss(a.id)} />
                 ))}
               </div>
             )}

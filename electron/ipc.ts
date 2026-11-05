@@ -158,6 +158,13 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
   handle('actions:list', (conversationId?: string) => agent.actions(conversationId))
   handle('actions:approve', (id: string) => agent.approve(id))
   handle('actions:reject', (id: string) => agent.reject(id))
+  handle('actions:dismiss', (id: string) => {
+    const row = db.get<any>(`SELECT status FROM pending_actions WHERE id = ?`, id)
+    if (!row) return { ok: true }
+    if (row.status === 'pending') return { ok: false, error: 'Действие ещё ждёт решения — сначала подтвердите или отмените его' }
+    db.run(`DELETE FROM pending_actions WHERE id = ?`, id)
+    return { ok: true }
+  })
   handle('activity:list', (conversationId?: string) => agent.activity(conversationId))
 
   /* -------------------------------- знания ---------------------------------- */

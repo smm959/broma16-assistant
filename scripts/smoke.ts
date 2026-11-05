@@ -93,6 +93,16 @@ app.whenReady().then(async () => {
     )
     check('Инструмент account_upload_files работает', /прикреплены/i.test(upRes.content), upRes.content.slice(0, 90))
 
+    /* ---------------- политика подтверждений ---------------- */
+    const { isFinalSubmit, toolMap: tools3 } = await import('../electron/agent/tools.js')
+    const clickRisk = tools3().get('account_click')!.risk as (a: any) => string
+    const fillRisk = tools3().get('account_fill')!.risk as (a: any) => string
+    check('Заполнение полей — без подтверждения', fillRisk({ selector: '#title', value: 'X' }) === 'safe', fillRisk({ selector: '#title', value: 'X' }))
+    check('Отправка формы (submit) — с подтверждением', fillRisk({ selector: '#title', value: 'X', submit: true }) === 'confirm')
+    check('Клик «Далее» — без подтверждения', clickRisk({ selector_or_text: 'Далее' }) === 'safe')
+    check('Клик «Отправить на релиз» — с подтверждением', clickRisk({ selector_or_text: 'Отправить на релиз' }) === 'confirm')
+    check('isFinalSubmit распознаёт публикацию', isFinalSubmit('Publish') && !isFinalSubmit('Обложка'))
+
     /* ---------------- сохранённый вход в кабинет ---------------- */
     await svc.browser.open('file://' + join(process.cwd(), 'test-fixtures', 'login.html'))
     const filled = await svc.browser.fillLogin('music959@example.com', 'super-secret-pass')

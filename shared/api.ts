@@ -76,6 +76,7 @@ export interface Api {
     list(conversationId?: string): Promise<PendingAction[]>
     approve(id: string): Promise<{ ok: boolean; error?: string }>
     reject(id: string): Promise<{ ok: boolean }>
+    dismiss(id: string): Promise<{ ok: boolean; error?: string }>
   }
   activity: {
     list(conversationId?: string): Promise<ActivityEvent[]>

@@ -304,7 +304,8 @@ export class AgentOrchestrator {
             continue
           }
 
-          if (def.risk === 'confirm') {
+          const risk = typeof def.risk === 'function' ? def.risk(args) : def.risk
+          if (risk === 'confirm') {
             const action = this.createPendingAction(conversationId, def, args, call)
             this.saveToolResult(conversationId, call, `ОЖИДАЕТ ПОДТВЕРЖДЕНИЯ ПОЛЬЗОВАТЕЛЯ: ${def.title?.(args) ?? def.name}. Ответ пользователю будет дан после его решения.`, action.id)
             stopped = true

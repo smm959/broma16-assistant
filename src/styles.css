@@ -254,6 +254,11 @@ a:hover { text-decoration: underline; }
 .action-card.failed, .action-card.rejected { border-color: #432828; background: #1b1213; }
 .action-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
 .action-head .badge { margin-left: auto; }
+.action-head .action-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-collapse { width: 22px; height: 22px; flex: 0 0 22px; }
+.action-collapse svg { transition: transform .15s; transform: rotate(90deg); }
+.action-card.collapsed .action-collapse svg { transform: rotate(0deg); }
+.action-close { width: 22px; height: 22px; flex: 0 0 22px; }
 .action-desc { color: var(--text-2); font-size: 12.3px; margin: 6px 0 0; }
 .action-preview { margin-top: 10px; border: 1px solid var(--line); border-radius: 9px; background: #0f0f11; padding: 10px 12px; font-size: 12.2px; }
 .action-preview .pv-row { display: flex; gap: 8px; margin-bottom: 5px; }

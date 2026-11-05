@@ -31,7 +31,7 @@ export interface ToolResult {
 export interface ToolDef {
   name: string
   description: string
-  risk: Risk
+  risk: Risk | ((args: Record<string, any>) => Risk)
   parameters: Record<string, unknown>
   title?: (args: Record<string, any>) => string
   preview?: (args: Record<string, any>, ctx: ToolContext) => {
@@ -423,8 +423,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'account_autologin',
     description:
-      'Открыть кабинет Broma 16 и подставить сохранённые логин/пароль (если пользователь включил «Запоминать вход»). Кнопку «Войти» и 2FA пользователь подтверждает сам.',
-    risk: 'confirm',
+      'Открыть кабинет Broma 16 и подставить сохранённые логин/пароль (если пользователь включил «Запоминать вход»). Вход выполняется автоматически.',
+    risk: 'safe',
     parameters: obj({}),
     title: () => 'Войти в кабинет Broma 16 сохранёнными данными',
     run: async (_a, ctx) => {
@@ -456,8 +456,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'account_click',
-    description: 'Нажать элемент на странице личного кабинета (по CSS-селектору или тексту). Требует подтверждения, т.к. меняет состояние аккаунта.',
-    risk: 'confirm',
+    description:
+      'Нажать элемент в кабинете (CSS-селектор или текст). Навигация, вкладки, «Далее», выбор типа релиза — без подтверждения. Кнопки отправки/публикации требуют подтверждения пользователя.',
+    risk: (a) => (isFinalSubmit(String(a.selector_or_text ?? '')) ? 'confirm' : 'safe'),
     parameters: obj({ selector_or_text: str('CSS-селектор или видимый текст') }, ['selector_or_text']),
     title: (a) => `Нажать «${a.selector_or_text}» в аккаунте Broma 16`,
     preview: (a) => ({ details: [{ label: 'Элемент', value: String(a.selector_or_text) }] }),
@@ -468,8 +469,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'account_fill',
-    description: 'Заполнить поле формы в личном кабинете. Требует подтверждения. Пароли и платёжные данные не заполнять без отдельного разрешения.',
-    risk: 'confirm',
+    description: 'Заполнить поле формы в личном кабинете. Обычные поля — без подтверждения; отправка формы (submit=true) требует подтверждения. Пароли и платёжные данные не заполнять без разрешения.',
+    risk: (a) => (a.submit ? 'confirm' : 'safe'),
     parameters: obj({ selector: str('CSS-селектор поля'), value: str('Значение'), submit: { type: 'boolean' } }, ['selector', 'value']),
     title: (a) => `Заполнить поле ${a.selector} в аккаунте`,
     preview: (a) => ({ details: [{ label: 'Поле', value: String(a.selector) }, { label: 'Значение', value: String(a.value) }] }),
@@ -505,8 +506,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'account_upload_files',
     description:
-      'Прикрепить файлы из вложений диалога (обложка, WAV, документы) в поле загрузки личного кабинета. Работает с обычными и скрытыми input[type=file]. Требует подтверждения пользователя. Перед вызовом проверь поля через account_file_inputs.',
-    risk: 'confirm',
+      'Прикрепить файлы из вложений диалога (обложка, WAV, документы) в поле загрузки личного кабинета. Работает с обычными и скрытыми input[type=file]. Загрузка идёт без отдельного подтверждения — проверь поля через account_file_inputs.',
+    risk: 'safe',
     parameters: obj(
       {
         attachment_ids: {
@@ -682,6 +683,13 @@ export const TOOLS: ToolDef[] = [
 
 export function toolMap(): Map<string, ToolDef> {
   return new Map(TOOLS.map((t) => [t.name, t]))
+}
+
+/** Кнопки, которые отправляют релиз/форму на модерацию — их жмём только после подтверждения. */
+export function isFinalSubmit(text: string): boolean {
+  return /(отправ\w*|опублик\w*|на релиз|на модерац\w*|submit|publish|send|finish|complete|заверш\w*|подтверд\w* релиз)/i.test(
+    text,
+  )
 }
 
 function stripTags(html: string) {

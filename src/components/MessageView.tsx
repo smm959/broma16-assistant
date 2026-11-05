@@ -86,23 +86,48 @@ export function MessageView({ message, streaming }: { message: ChatMessage; stre
   )
 }
 
-export function ActionCard({ action, onApprove, onReject }: { action: PendingAction; onApprove: () => Promise<void>; onReject: () => Promise<void> }) {
+export function ActionCard({
+  action,
+  onApprove,
+  onReject,
+  onDismiss,
+}: {
+  action: PendingAction
+  onApprove: () => Promise<void>
+  onReject: () => Promise<void>
+  onDismiss?: () => Promise<void>
+}) {
   const [busy, setBusy] = React.useState<'approve' | 'reject' | null>(null)
+  const [collapsed, setCollapsed] = React.useState(false)
   const pending = action.status === 'pending'
   const done = action.status === 'done'
   const failed = action.status === 'failed'
   const rejected = action.status === 'rejected'
 
   return (
-    <div className={`action-card ${done ? 'done' : ''} ${failed ? 'failed' : ''} ${rejected ? 'rejected' : ''}`}>
+    <div className={`action-card ${done ? 'done' : ''} ${failed ? 'failed' : ''} ${rejected ? 'rejected' : ''} ${collapsed ? 'collapsed' : ''}`}>
       <div className="action-head">
+        <button className="icon-btn action-collapse" title={collapsed ? 'Развернуть' : 'Свернуть'} onClick={() => setCollapsed(!collapsed)}>
+          <Icon name="chevron" size={14} />
+        </button>
         <Icon name={done ? 'check' : rejected || failed ? 'x' : 'sparkle'} size={15} />
-        {action.title}
+        <span className="action-title">{action.title}</span>
         <span className={`badge ${done ? 'green' : rejected ? 'red' : failed ? 'red' : 'amber'}`}>
           {done ? 'выполнено' : rejected ? 'отклонено' : failed ? 'ошибка' : action.status === 'executing' ? 'выполняется' : 'нужно подтверждение'}
         </span>
+        {onDismiss && !pending && (
+          <button
+            className="icon-btn action-close"
+            title="Закрыть задачу"
+            onClick={async () => {
+              await onDismiss()
+            }}
+          >
+            <Icon name="x" size={13} />
+          </button>
+        )}
       </div>
-      {action.preview ? (
+      {!collapsed && (action.preview ? (
         <div className="action-preview">
           {action.preview.to && (
             <div className="pv-row"><span className="pv-label">Кому</span><span>{action.preview.to}</span></div>
@@ -117,10 +142,10 @@ export function ActionCard({ action, onApprove, onReject }: { action: PendingAct
         </div>
       ) : (
         <p className="action-desc">{action.description}</p>
-      )}
-      {action.result && <div className="action-result">{action.result.split('\n')[0]}</div>}
-      {action.error && <div className="action-result" style={{ color: '#ff9b9b' }}>{action.error}</div>}
-      {pending && (
+      ))}
+      {!collapsed && action.result && <div className="action-result">{action.result.split('\n')[0]}</div>}
+      {!collapsed && action.error && <div className="action-result" style={{ color: '#ff9b9b' }}>{action.error}</div>}
+      {!collapsed && pending && (
         <div className="action-actions">
           <button
             className="btn btn-primary btn-sm"

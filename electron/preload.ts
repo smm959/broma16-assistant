@@ -58,6 +58,7 @@ const api = {
     list: (conversationId?: string) => invoke('actions:list', conversationId),
     approve: (id: string) => invoke('actions:approve', id),
     reject: (id: string) => invoke('actions:reject', id),
+    dismiss: (id: string) => invoke('actions:dismiss', id),
   },
   activity: {
     list: (conversationId?: string) => invoke('activity:list', conversationId),
