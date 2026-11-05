@@ -21,6 +21,7 @@ export interface ToolContext {
   attachments: Map<string, AttachmentRef>
   accountCredentials: () => { login: string; password: string | null }
   vision: VisionService
+  conversationId?: string
 }
 
 export interface ToolResult {
@@ -479,12 +480,19 @@ export const TOOLS: ToolDef[] = [
     name: 'account_click',
     description:
       'Нажать элемент в кабинете (CSS-селектор или текст). Навигация, вкладки, «Далее», выбор типа релиза — без подтверждения. Кнопки отправки/публикации требуют подтверждения пользователя.',
-    risk: (a) => (isFinalSubmit(String(a.selector_or_text ?? '')) ? 'confirm' : 'safe'),
+    risk: (a) => (isDangerous(String(a.selector_or_text ?? '')) ? 'confirm' : 'safe'),
     parameters: obj({ selector_or_text: str('CSS-селектор или видимый текст') }, ['selector_or_text']),
     title: (a) => `Нажать «${a.selector_or_text}» в аккаунте Broma 16`,
     preview: (a) => ({ details: [{ label: 'Элемент', value: String(a.selector_or_text) }] }),
     run: async (args, ctx) => {
-      const r = await ctx.browser.click(String(args.selector_or_text))
+      const target = String(args.selector_or_text)
+      const info = await ctx.browser.describeTarget(target)
+      if (info.found && isFinalSubmit(String(info.text ?? ''))) {
+        return {
+          content: `Это финальная кнопка «${info.text}». Я её не нажимаю принципиально — проверь форму глазами и отправь сам. Если что-то не так, скажи, поправлю до отправки.`,
+        }
+      }
+      const r = await ctx.browser.click(target)
       return { content: r.ok ? `Клик выполнен: ${r.note}. Прочитай страницу снова (account_read), чтобы увидеть результат.` : `Не удалось: ${r.note}` }
     },
   },
@@ -808,6 +816,29 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'attachments_list',
+    description: 'Список файлов, которые пользователь прикреплял в этом диалоге: id, имя, тип, размер, дата. Используй перед загрузкой обложки/аудио, чтобы не утверждать, что файла нет.',
+    risk: 'safe',
+    parameters: obj({}),
+    run: async (_a, ctx) => {
+      const rows = ctx.db.all<any>(
+        `SELECT a.id, a.filename, a.kind, a.size, a.mime_type, a.created_at
+         FROM chat_attachments a JOIN messages m ON m.id = a.message_id
+         WHERE m.conversation_id = ? ORDER BY m.created_at DESC LIMIT 50`,
+        ctx.conversationId ?? '',
+      )
+      if (!rows.length) return { content: 'В этом диалоге нет прикреплённых файлов.' }
+      return {
+        content: rows
+          .map(
+            (r) =>
+              `- ${r.filename} | ${r.kind} | ${Math.round(Number(r.size) / 1024)} КБ | id=${r.id} | ${new Date(r.created_at).toLocaleString('ru-RU')}`,
+          )
+          .join('\n'),
+      }
+    },
+  },
+  {
     name: 'export_text',
     description: 'Сохранить подготовленный текст (письмо, план, отчёт) в файл в папке документов приложения и вернуть путь.',
     risk: 'safe',
@@ -824,10 +855,16 @@ export function toolMap(): Map<string, ToolDef> {
 }
 
 /** Кнопки, которые отправляют релиз/форму на модерацию — их жмём только после подтверждения. */
+/** Опасные действия (удаление, снятие) — только с подтверждением. */
+export function isDangerous(text: string): boolean {
+  return /(удал\w*|delete|снять\s+с\s+публикац\w*|unpublish|remove)/i.test(String(text || ''))
+}
+
 export function isFinalSubmit(text: string): boolean {
-  return /(отправ\w*|опублик\w*|на релиз|на модерац\w*|submit|publish|send|finish|complete|заверш\w*|подтверд\w* релиз)/i.test(
-    text,
-  )
+  const t = String(text || '')
+  // «Релиз ранее уже был опубликован» — это чекбокс, а не отправка.
+  if (/ранее уже был опубликован|already been released|previously released/i.test(t)) return false
+  return /(отправить|отправка|на модерац\w*|submit|publish|send to|send$|опубликовать|загрузить на модерац\w*)/i.test(t)
 }
 
 function stripTags(html: string) {

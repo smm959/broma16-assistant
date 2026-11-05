@@ -66,13 +66,15 @@ const TOOL_LABELS: Record<string, string> = {
   export_text: 'Сохраняю файл',
 }
 
-const MAX_STEPS = 16
+const MAX_STEPS = 120
 const HISTORY_MESSAGES = 40
 const TOOL_RESULT_LIMIT = 24_000
 
 export class AgentOrchestrator {
   private running = new Set<string>()
   private controllers = new Map<string, AbortController>()
+  private autoContinues = new Map<string, number>()
+  private runStartedAt = new Map<string, number>()
   private activitySeq = 0
 
   constructor(
@@ -185,6 +187,8 @@ export class AgentOrchestrator {
 
   async sendUserMessage(input: { conversationId?: string; text: string; attachments?: AttachmentRef[] }): Promise<{ conversationId: string; message: ChatMessage }> {
     const conv = this.ensureConversation(input.conversationId)
+    this.autoContinues.delete(conv.id)
+    this.runStartedAt.set(conv.id, Date.now())
     const msgId = `msg_${randomUUID().slice(0, 10)}`
     const createdAt = Date.now()
     this.deps.db.run(`INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)`, msgId, conv.id, input.text, createdAt)
@@ -243,6 +247,7 @@ export class AgentOrchestrator {
           this.deps.db,
           this.deps.kb.status(),
           { hasVision: this.deps.llm.supportsVision(), hasTools: this.deps.llm.supportsTools() },
+          conversationId,
         )
         const streamId = `msg_${randomUUID().slice(0, 10)}`
         let streamed = ''
@@ -353,10 +358,21 @@ export class AgentOrchestrator {
         }
       }
       if (!finished) {
-        this.postAssistant(
-          conversationId,
-          `Остановился на лимите шагов (${MAX_STEPS}), чтобы не зацикливаться. Напишите «продолжай» — вернусь к задаче с места, где остановился.`,
-        )
+        // Не просим пользователя «продолжай»: продолжаем сами, пока не упрёмся
+        // в финальную кнопку, реальный блокер или общий лимит времени.
+        const used = this.autoContinues.get(conversationId) ?? 0
+        const elapsed = Date.now() - (this.runStartedAt.get(conversationId) ?? Date.now())
+        if (used < 6 && elapsed < 15 * 60_000) {
+          this.autoContinues.set(conversationId, used + 1)
+          this.logActivity(conversationId, 'thinking', 'Продолжаю работу с того же места')
+          setTimeout(() => void this.run(conversationId), 400)
+        } else {
+          this.autoContinues.delete(conversationId)
+          this.postAssistant(
+            conversationId,
+            'Остановился: задача очень длинная (лимит шагов/времени). Форма сохранена — напишите «продолжай», и я продолжу с этого места.',
+          )
+        }
       }
     } finally {
       this.controllers.delete(conversationId)
@@ -526,6 +542,7 @@ export class AgentOrchestrator {
         password: secrets().get('broma:password'),
       }),
       vision: this.deps.vision,
+      conversationId,
     }
   }
 

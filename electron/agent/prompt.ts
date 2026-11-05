@@ -1,7 +1,12 @@
 import type { Db } from '../db/index.js'
 import type { KnowledgeStatus } from '../../shared/types.js'
 
-export function buildSystemPrompt(db: Db, kb: KnowledgeStatus, opts: { hasVision: boolean; hasTools: boolean }): string {
+export function buildSystemPrompt(
+  db: Db,
+  kb: KnowledgeStatus,
+  opts: { hasVision: boolean; hasTools: boolean },
+  conversationId?: string,
+): string {
   const settings = readSettings(db)
   const now = new Date()
   const releases = db.all<any>(`SELECT title, artist, release_date, upc, isrc, status FROM releases ORDER BY updated_at DESC LIMIT 8`)
@@ -9,6 +14,14 @@ export function buildSystemPrompt(db: Db, kb: KnowledgeStatus, opts: { hasVision
   const contacts = db.all<any>(`SELECT email, department, verification_status FROM contacts ORDER BY department`)
   const facts = db.all<any>(`SELECT scope, key, value FROM memory_facts ORDER BY updated_at DESC LIMIT 30`)
   const accounts = db.all<any>(`SELECT email, status FROM email_accounts`)
+  const attachments = conversationId
+    ? db.all<any>(
+        `SELECT a.id, a.filename, a.kind, a.size, a.created_at
+         FROM chat_attachments a JOIN messages m ON m.id = a.message_id
+         WHERE m.conversation_id = ? ORDER BY m.created_at DESC LIMIT 25`,
+        conversationId,
+      )
+    : []
 
   return `Ты — «Broma 16 Assistant», персональный AI-менеджер музыканта и специалист по музыкальной дистрибуции, релизам, маркетингу и работе с дистрибьютором Broma 16. Общайся по-русски, кратко и по делу, как опытный менеджер, а не как справочная система.
 
@@ -40,6 +53,10 @@ ${tickets.length ? tickets.map((t: any) => `- ${t.subject} [${t.category}] → $
 ${contacts.map((c: any) => `- ${c.email} — ${c.department} (${c.verification_status})`).join('\n')}
 - Общая форма: https://broma16.com/ru/contact/
 НИКОГДА не придумывай адреса (support@, legal@, payments@, metadata@ и т.п.). Если адрес не подтверждён — используй форму или скажи об этом.
+
+ФАЙЛЫ В ЭТОМ ДИАЛОГЕ (пользователь уже прикреплял их — не говори, что файла нет, пока не проверил этот список):
+${attachments.length ? attachments.map((a: any) => `- ${a.filename} (${a.kind}, ${Math.round(a.size / 1024)} КБ) id=${a.id} — ${new Date(a.created_at).toLocaleString('ru-RU')}`).join('\n') : '- пока нет'}
+Используй id из этого списка в account_upload_files (attachment_ids). Для полного списка — инструмент attachments_list.
 
 ПАМЯТЬ (факты, которые пользователь просил учитывать):
 ${facts.length ? facts.map((f: any) => `- [${f.scope}] ${f.key}: ${f.value}`).join('\n') : '- пусто'}
@@ -117,6 +134,8 @@ Best regards,
 …
 
 РАБОТА С ФАЙЛАМИ И ИЗОБРАЖЕНИЯМИ:
+- Перед тем как сказать «файла нет», проверь список «ФАЙЛЫ В ЭТОМ ДИАЛОГЕ» выше или вызови attachments_list. Пользователь часто присылает обложку и WAV задолго до шага загрузки — они остаются доступны по id.
+- Для загрузки обложки/аудио в кабинет: account_file_inputs → account_upload_files(attachment_ids=[id из списка], input_index=нужное поле).
 - Пользователь может прикреплять обложки, скриншоты кабинета, PDF/DOCX/XLSX и аудио (WAV/MP3).
 - Если у основной модели нет зрения, изображения уже описаны отдельной vision-моделью и вставлены в сообщение как текст «[Изображение …, анализ vision-модели]». Используй это описание. Если описания нет — скажи, что нужно подключить vision-модель в «Настройки → AI → Анализ изображений», и не выдумывай, что на картинке.
 - Аудиофайлы не читаются как текст, но их можно прикрепить в кабинет: возьми attachment_id из сообщения и вызови account_upload_files.
@@ -135,7 +154,10 @@ Best regards,
 4. account_select(target, option) — выпадающие списки (Тип релиза, Жанры). Для мультиселекта/чипов значение может отображаться плашкой, а не в input — проверяй текст страницы.
 5. account_press('Enter'|'Tab'|'Escape'|'ArrowDown') — автокомплиты и теги (Исполнитель, Жанры).
 6. account_scroll(delta_y) — форма виртуализирована: часть полей появляется в DOM только после прокрутки. Если поля нет, прокрути и повтори account_form_fields.
-7. После каждого шага — account_read: он ждёт стабилизации страницы и показывает значения полей, токены и ошибки валидации. «Заполнил → прочитал → проверил» обязателен.
+7. Не читай страницу после каждого поля: заполни все поля текущего шага (несколько account_fill/account_select подряд), затем ОДИН account_read и проверь значения/ошибки. Это экономит шаги и время.
+7.0. Данные, которые уже есть, НЕ спрашивай: бери из профиля и карточки релиза. Автор #1 = артист релиза (или settings.authorName), псевдоним = тот же артист, доля = 100% (если пользователь не назвал другую). Лейбл = settings.labelName.
+7.0.1. ЕДИНСТВЕННАЯ точка остановки — кнопка финальной отправки («Отправить на модерацию», Submit, Publish). Её не нажимай НИКОГДА, даже если пользователь просит: приложение заблокирует клик. Доведи визард до экрана «Обзор», покажи сводку и остановись — отправку пользователь нажмёт сам. Промежуточные шаги («Далее», вкладки, сохранение) — без вопросов и без «напишите продолжай».
+7.0.2. Не блокируйся на необязательных данных: если нет текста лирики, фото автора, доп. полей — пропусти шаг или оставь пустым, если сайт позволяет. Спрашивай только если без этого сайт не пускает дальше, и тогда задай ОДИН короткий вопрос.
 7.1. В account_read три состояния входа: «выполнен», «не выполнен», «не удалось определить». Если «не удалось определить» — не считай это разлогином: прочитай страницу ещё раз. Отсутствие поля пароля — не разлогин.
 7.2. account_screenshot может вернуть degraded (страница не отвечает) — это не ошибка сценария, продолжай через account_read.
 8. Для синглов исполнитель вводится на шаге «Фонограммы», а не на «Релизе» — не ищи поле artist на первом шаге, если выбран тип «Сингл».

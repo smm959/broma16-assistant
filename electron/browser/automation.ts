@@ -264,6 +264,18 @@ export class BrowserAutomation {
     }
   }
 
+  /** Если окно открыто без страницы (после сброса), загружаем вход, чтобы renderer ожил. */
+  private async ensurePage(win: BrowserWindow): Promise<void> {
+    if (win.webContents.getURL()) return
+    try {
+      await win.loadURL(LOGIN_URL)
+    } catch {
+      /* нет сети — ниже просто подождём */
+    }
+    await this.waitReady(win, 5000).catch(() => undefined)
+    await this.waitForContent(win, 5, 8000).catch(() => undefined)
+  }
+
   /** Сбросить окно кабинета: следующее действие создаст чистое окно. */
   resetWindow() {
     const w = this.win
@@ -401,6 +413,7 @@ export class BrowserAutomation {
     links: { text: string; href: string }[]
   }> {
     const win = this.ensureWindow(false)
+    await this.ensurePage(win)
     await this.waitReady(win)
     await this.waitForStable(win).catch(() => undefined)
 
@@ -428,6 +441,46 @@ export class BrowserAutomation {
       hasOtpField: Boolean(data.hasOtpField),
       links: data.links ?? [],
     }
+  }
+
+  /** Что за элемент будет нажат: текст, тег, disabled. Нужно для защиты финальной кнопки. */
+  async describeTarget(selectorOrText: string): Promise<{
+    found: boolean
+    text?: string
+    tag?: string
+    disabled?: boolean
+    html?: string
+  }> {
+    const win = this.ensureWindow(false)
+    await this.ensurePage(win)
+    return (await this.ev(win,
+      `(() => {
+        const sel = ${JSON.stringify(selectorOrText)}
+        const visible = (el) => {
+          const r = el.getBoundingClientRect()
+          const st = getComputedStyle(el)
+          return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'
+        }
+        let el = null
+        try {
+          const found = [...document.querySelectorAll(sel)].filter(visible)
+          el = found[0] || null
+        } catch (e) {}
+        if (!el) {
+          const all = [...document.querySelectorAll('a,button,[role=button],input[type=submit]')].filter(visible)
+          el = all.find((e) => ((e.innerText || e.value || '').trim().toLowerCase().includes(sel.toLowerCase()))) || null
+        }
+        if (!el) return { found: false }
+        return {
+          found: true,
+          text: ((el.innerText || el.value || el.getAttribute('aria-label') || '').trim()).slice(0, 200),
+          tag: el.tagName.toLowerCase(),
+          disabled: Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true',
+          html: el.outerHTML.slice(0, 200),
+        }
+      })()`,
+      true,
+    )) as any
   }
 
   async click(selectorOrText: string): Promise<{ ok: boolean; note: string }> {
@@ -489,6 +542,7 @@ export class BrowserAutomation {
 
   async screenshot(): Promise<{ path: string; degraded: boolean; note?: string }> {
     const win = this.ensureWindow(false)
+    await this.ensurePage(win)
     const grab = async () => {
       let timer: NodeJS.Timeout | undefined
       try {
@@ -679,6 +733,7 @@ export class BrowserAutomation {
     { index: number; accept?: string; multiple: boolean; visible: boolean; hint?: string }[]
   > {
     const win = this.ensureWindow(false)
+    await this.ensurePage(win)
     await this.waitReady(win)
     return this.ev(win, 
       String.raw`(() => [...document.querySelectorAll('input[type=file]')].map((el, index) => {
@@ -706,6 +761,7 @@ export class BrowserAutomation {
   ): Promise<{ ok: boolean; note: string; files?: { name: string; size: number }[] }> {
     if (!paths.length) return { ok: false, note: 'Не переданы файлы' }
     const win = this.ensureWindow(false)
+    await this.ensurePage(win)
     await this.waitReady(win)
     const dbg = win.webContents.debugger
     try {
@@ -742,6 +798,7 @@ export class BrowserAutomation {
   /** Все поля формы с семантикой: id, placeholder, wrapper, label, required, значение. */
   async formFields(): Promise<unknown[]> {
     const win = this.ensureWindow(false)
+    await this.ensurePage(win)
     await this.waitReady(win)
     return (await this.ev(win, FORM_FIELDS_JS, true)) as unknown[]
   }
@@ -778,6 +835,7 @@ export class BrowserAutomation {
     datepicker?: boolean
   }> {
     const win = this.ensureWindow(false)
+    await this.ensurePage(win)
     await this.waitReady(win)
     const resolved = (await this.ev(win, RESOLVE_JS(target), true)) as {
       index?: number
@@ -955,6 +1013,7 @@ export class BrowserAutomation {
     optionText: string,
   ): Promise<{ ok: boolean; note: string; before?: string; after?: string; options?: string[] }> {
     const win = this.ensureWindow(false)
+    await this.ensurePage(win)
     await this.waitReady(win)
     const resolved = (await this.ev(win, RESOLVE_JS(target), true)) as { index?: number; reason?: string; candidates?: unknown[] }
     if (resolved.index === undefined) {
