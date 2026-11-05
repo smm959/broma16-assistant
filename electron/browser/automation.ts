@@ -123,6 +123,25 @@ const RESOLVE_JS = (target: string | number) => String.raw`(() => {
 
 const FIELD_BY_INDEX = (index: number) => `document.querySelectorAll('input,select,textarea')[${index}]`
 
+
+/** executeJavaScript с таймаутом: зависший/упавший renderer не должен блокировать агента. */
+async function execJs(wc: Electron.WebContents, script: string, gesture?: boolean): Promise<any> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      wc.executeJavaScript(script, gesture as boolean),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Страница кабинета не отвечает (таймаут 20 с). Переоткрой кабинет через account_open и повтори.')),
+          20_000,
+        )
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export class BrowserAutomation {
   private win: BrowserWindow | null = null
   private lastUrl = ''
@@ -130,6 +149,51 @@ export class BrowserAutomation {
   private lastText = ''
 
   constructor(private readonly userDataDir: string) {}
+
+  /** Ждём, пока SPA отрисует содержимое (loadURL резолвится раньше, чем Angular). */
+  private async waitForContent(win: BrowserWindow, minLen = 20, timeoutMs = 10_000): Promise<void> {
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      try {
+        const len = (await execJs(win.webContents, 'document.body ? document.body.innerText.length : 0')) as number
+        if (Number(len) >= minLen) return
+      } catch (e) {
+        this.resetWindow()
+        throw e
+      }
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }
+
+  /** Сбросить окно кабинета: следующее действие создаст чистое окно. */
+  resetWindow() {
+    const w = this.win
+    this.win = null
+    try {
+      w?.destroy()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Выполнение JS с автосбросом окна при зависании/падении renderer. */
+  private async ev(win: BrowserWindow, script: string, gesture?: boolean): Promise<any> {
+    try {
+      return await execJs(win.webContents, script, gesture)
+    } catch (e) {
+      this.resetWindow()
+      throw e
+    }
+  }
+
+  /** Ждём загрузку страницы, но не дольше таймаута: SPA может «висеть» в загрузке вечно. */
+  private async waitReady(win: BrowserWindow, timeoutMs = 8000) {
+    if (!win.webContents.isLoading()) return
+    await Promise.race([
+      new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ])
+  }
 
   private ensureWindow(show = true): BrowserWindow {
     if (this.win && !this.win.isDestroyed()) {
@@ -154,12 +218,34 @@ export class BrowserAutomation {
     this.win.on('closed', () => {
       this.win = null
     })
+    this.win.webContents.on('render-process-gone', () => {
+      try {
+        this.win?.destroy()
+      } catch {
+        /* ignore */
+      }
+      this.win = null
+    })
     // Портал может открывать вход/оплату через window.open — ведём всё в этом же окне,
     // иначе появляется «новое окно» без сохранённой сессии и автозаполнения.
     this.win.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:/i.test(url)) setTimeout(() => void this.open(url, true), 50)
       return { action: 'deny' }
     })
+    // Автоматически закрываем нативные JS-диалоги (alert/confirm), иначе renderer
+    // блокируется и любые действия агента «висят».
+    try {
+      const dbg = this.win.webContents.debugger
+      dbg.attach('1.3')
+      void dbg.sendCommand('Page.enable').catch(() => undefined)
+      dbg.on('message', (_event, method, params: any) => {
+        if (method === 'Page.javascriptDialogOpening') {
+          void dbg.sendCommand('Page.handleJavaScriptDialog', { accept: Boolean(params?.type === 'alert' || params?.type === 'beforeunload') }).catch(() => undefined)
+        }
+      })
+    } catch {
+      /* debugger может быть занят DevTools — не критично */
+    }
     this.win.webContents.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
     )
@@ -169,7 +255,21 @@ export class BrowserAutomation {
   async open(url: string = PORTAL_URL, show = true): Promise<{ url: string; title: string }> {
     const win = this.ensureWindow(show)
     if (show) win.show()
-    await win.loadURL(url)
+    let timer: NodeJS.Timeout | undefined
+    try {
+      await Promise.race([
+        win.loadURL(url),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`Страница ${url} не загрузилась за 25 секунд`)), 25_000)
+        }),
+      ])
+    } catch (e) {
+      this.resetWindow()
+      throw e
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+    await this.waitForContent(win)
     this.lastUrl = win.webContents.getURL()
     this.lastTitle = win.getTitle()
     return { url: this.lastUrl, title: this.lastTitle }
@@ -185,10 +285,9 @@ export class BrowserAutomation {
     links: { text: string; href: string }[]
   }> {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    const data = (await win.webContents.executeJavaScript(
+    await this.waitReady(win)
+    await this.waitForContent(win, 10, 6000).catch(() => undefined)
+    const data = (await this.ev(win, 
       `(() => {
         const text = document.body ? document.body.innerText : ''
         const links = [...document.querySelectorAll('a[href]')].slice(0, 80).map(a => ({ text: (a.innerText||'').trim().slice(0,80), href: a.href }))
@@ -238,7 +337,7 @@ export class BrowserAutomation {
 
   async click(selectorOrText: string): Promise<{ ok: boolean; note: string }> {
     const win = this.ensureWindow(false)
-    const result = await win.webContents.executeJavaScript(
+    const result = await this.ev(win, 
       `(() => {
         const sel = ${JSON.stringify(selectorOrText)}
         let el = null
@@ -260,7 +359,7 @@ export class BrowserAutomation {
 
   async fill(selector: string, value: string, submit = false): Promise<{ ok: boolean; note: string }> {
     const win = this.ensureWindow(false)
-    const result = await win.webContents.executeJavaScript(
+    const result = await this.ev(win, 
       `(() => {
         const el = document.querySelector(${JSON.stringify(selector)})
         if (!el) return { ok: false, note: 'Поле не найдено: ' + ${JSON.stringify(selector)} }
@@ -280,7 +379,7 @@ export class BrowserAutomation {
 
   async navigateToLinkByText(text: string): Promise<{ ok: boolean; url?: string; note: string }> {
     const win = this.ensureWindow(false)
-    const href = await win.webContents.executeJavaScript(
+    const href = await this.ev(win, 
       `(() => {
         const t = ${JSON.stringify(text.toLowerCase())}
         const a = [...document.querySelectorAll('a[href]')].find(x => ((x.innerText||'') + ' ' + (x.href||'')).toLowerCase().includes(t))
@@ -309,10 +408,8 @@ export class BrowserAutomation {
    */
   async fillLogin(login: string, password: string): Promise<{ ok: boolean; note: string; fields: number }> {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    const result = (await win.webContents.executeJavaScript(
+    await this.waitReady(win)
+    const result = (await this.ev(win, 
       `(() => {
         const loginValue = ${JSON.stringify(login)}
         const passwordValue = ${JSON.stringify(password)}
@@ -352,10 +449,8 @@ export class BrowserAutomation {
   /** Заполняет поле(я) кода подтверждения (OTP), включая формы из нескольких однозначных ячеек. */
   async fillOtp(code: string): Promise<{ ok: boolean; note: string; fields: number }> {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    const result = (await win.webContents.executeJavaScript(
+    await this.waitReady(win)
+    const result = (await this.ev(win, 
       `(() => {
         const code = ${JSON.stringify(code)}
         const visible = (el) => {
@@ -394,10 +489,8 @@ export class BrowserAutomation {
   /** Нажимает кнопку отправки формы входа/кода (или Enter), чтобы завершить шаг. */
   async submitForm(kind: 'login' | 'otp' = 'login'): Promise<{ ok: boolean; note: string }> {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    const result = (await win.webContents.executeJavaScript(
+    await this.waitReady(win)
+    const result = (await this.ev(win, 
       `(() => {
         const kind = ${JSON.stringify(kind)}
         const visible = (el) => {
@@ -468,10 +561,8 @@ export class BrowserAutomation {
     { index: number; accept?: string; multiple: boolean; visible: boolean; hint?: string }[]
   > {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    return win.webContents.executeJavaScript(
+    await this.waitReady(win)
+    return this.ev(win, 
       String.raw`(() => [...document.querySelectorAll('input[type=file]')].map((el, index) => {
         const rect = el.getBoundingClientRect()
         const label = el.closest('label')?.innerText || el.getAttribute('aria-label') || el.name || el.id || ''
@@ -497,9 +588,7 @@ export class BrowserAutomation {
   ): Promise<{ ok: boolean; note: string; files?: { name: string; size: number }[] }> {
     if (!paths.length) return { ok: false, note: 'Не переданы файлы' }
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
+    await this.waitReady(win)
     const dbg = win.webContents.debugger
     try {
       if (!dbg.isAttached()) dbg.attach('1.3')
@@ -515,7 +604,7 @@ export class BrowserAutomation {
       const requested = (await dbg.sendCommand('DOM.requestNode', { objectId })) as { nodeId?: number }
       if (!requested?.nodeId) return { ok: false, note: 'Не удалось получить узел поля загрузки' }
       await dbg.sendCommand('DOM.setFileInputFiles', { files: paths, nodeId: requested.nodeId })
-      const files = (await win.webContents.executeJavaScript(
+      const files = (await this.ev(win, 
         `(() => { const el = document.querySelectorAll('input[type=file]')[${index}]; return el ? [...el.files].map(f => ({ name: f.name, size: f.size })) : [] })()`,
         true,
       )) as { name: string; size: number }[]
@@ -527,11 +616,7 @@ export class BrowserAutomation {
     } catch (e) {
       return { ok: false, note: `Ошибка загрузки: ${(e as Error).message}` }
     } finally {
-      try {
-        if (dbg.isAttached()) dbg.detach()
-      } catch {
-        /* ignore */
-      }
+      /* debugger оставляем подключённым: он ловит JS-диалоги и не блокирует окно */
     }
   }
 
@@ -539,16 +624,14 @@ export class BrowserAutomation {
   /** Все поля формы с семантикой: id, placeholder, wrapper, label, required, значение. */
   async formFields(): Promise<unknown[]> {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    return (await win.webContents.executeJavaScript(FORM_FIELDS_JS, true)) as unknown[]
+    await this.waitReady(win)
+    return (await this.ev(win, FORM_FIELDS_JS, true)) as unknown[]
   }
 
   /** Ошибки валидации на странице (тексты) — для проверки «заполнил → прочитал». */
   async validationErrors(): Promise<string[]> {
     const win = this.ensureWindow(false)
-    return (await win.webContents.executeJavaScript(
+    return (await this.ev(win, 
       `(() => {
         const nodes = [...document.querySelectorAll('.p-error, .p-invalid, [role=alert], .error, .invalid-feedback, [class*=error-message]')]
         const texts = nodes.map((n) => (n.innerText || '').trim()).filter((t) => t && t.length < 200)
@@ -577,10 +660,8 @@ export class BrowserAutomation {
     datepicker?: boolean
   }> {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    const resolved = (await win.webContents.executeJavaScript(RESOLVE_JS(target), true)) as {
+    await this.waitReady(win)
+    const resolved = (await this.ev(win, RESOLVE_JS(target), true)) as {
       index?: number
       via?: string
       reason?: string
@@ -591,7 +672,7 @@ export class BrowserAutomation {
     }
 
     const index = resolved.index
-    const before = (await win.webContents.executeJavaScript(
+    const before = (await this.ev(win, 
       String.raw`(() => {
         const el = ${FIELD_BY_INDEX(index)}
         const wrap = el.closest('[id]')
@@ -610,7 +691,7 @@ export class BrowserAutomation {
     // Календарь (p-calendar): используем сам виджет, иначе Angular не примет значение.
     if (before.datepicker) {
       const dateResult = await this.pickDate(index, String(value).trim())
-      const after = await win.webContents.executeJavaScript(`(${FIELD_BY_INDEX(index)}).value`, true)
+      const after = await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)
       return {
         ok: dateResult.ok,
         note: dateResult.note,
@@ -624,7 +705,7 @@ export class BrowserAutomation {
 
     if (String(before.type) === 'checkbox' || String(before.type) === 'radio') {
       const want = /^(1|true|on|yes|да|checked|включ)/i.test(String(value).trim())
-      const res = (await win.webContents.executeJavaScript(
+      const res = (await this.ev(win, 
         String.raw`(() => {
           const el = ${FIELD_BY_INDEX(index)}
           if (el.checked !== ${want}) el.click()
@@ -644,7 +725,7 @@ export class BrowserAutomation {
     }
 
     const isSelect = String(before.tag) === 'select'
-    const result = (await win.webContents.executeJavaScript(
+    const result = (await this.ev(win, 
       isSelect
         ? `(() => {
             const el = ${FIELD_BY_INDEX(index)}
@@ -698,7 +779,7 @@ export class BrowserAutomation {
   /** Прокрутить страницу (для виртуализированных форм, где поля рендерятся по мере скролла). */
   async scrollBy(deltaY: number): Promise<{ ok: boolean; note: string }> {
     const win = this.ensureWindow(false)
-    await win.webContents.executeJavaScript(`(() => { window.scrollBy(0, ${Math.round(deltaY)}); return true })()`, true)
+    await this.ev(win, `(() => { window.scrollBy(0, ${Math.round(deltaY)}); return true })()`, true)
     await new Promise((r) => setTimeout(r, 400))
     return { ok: true, note: `Прокручено на ${Math.round(deltaY)}px` }
   }
@@ -725,11 +806,7 @@ export class BrowserAutomation {
     } catch (e) {
       return { ok: false, note: `Не удалось нажать ${key}: ${(e as Error).message}` }
     } finally {
-      try {
-        if (dbg.isAttached()) dbg.detach()
-      } catch {
-        /* ignore */
-      }
+      /* debugger оставляем подключённым: он ловит JS-диалоги и не блокирует окно */
     }
   }
 
@@ -739,22 +816,18 @@ export class BrowserAutomation {
     const dbg = win.webContents.debugger
     try {
       if (!dbg.isAttached()) dbg.attach('1.3')
-      await win.webContents.executeJavaScript(
+      await this.ev(win, 
         `(() => { const el = ${FIELD_BY_INDEX(index)}; el.focus(); el.select && el.select(); return true })()`,
         true,
       )
       await dbg.sendCommand('Input.insertText', { text: value })
-      await win.webContents.executeJavaScript(`(${FIELD_BY_INDEX(index)}).blur()`, true)
-      const after = (await win.webContents.executeJavaScript(`(${FIELD_BY_INDEX(index)}).value`, true)) as string
+      await this.ev(win, `(${FIELD_BY_INDEX(index)}).blur()`, true)
+      const after = (await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) as string
       return { ok: after === value, value: String(after ?? '') }
     } catch {
       return { ok: false, value: '' }
     } finally {
-      try {
-        if (dbg.isAttached()) dbg.detach()
-      } catch {
-        /* ignore */
-      }
+      /* debugger оставляем подключённым: он ловит JS-диалоги и не блокирует окно */
     }
   }
 
@@ -764,20 +837,18 @@ export class BrowserAutomation {
     optionText: string,
   ): Promise<{ ok: boolean; note: string; before?: string; after?: string; options?: string[] }> {
     const win = this.ensureWindow(false)
-    if (win.webContents.isLoading()) {
-      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
-    }
-    const resolved = (await win.webContents.executeJavaScript(RESOLVE_JS(target), true)) as { index?: number; reason?: string; candidates?: unknown[] }
+    await this.waitReady(win)
+    const resolved = (await this.ev(win, RESOLVE_JS(target), true)) as { index?: number; reason?: string; candidates?: unknown[] }
     if (resolved.index === undefined) {
       return { ok: false, note: resolved.reason ?? 'Поле не найдено' }
     }
     const index = resolved.index
-    const before = (await win.webContents.executeJavaScript(`(() => { const el = ${FIELD_BY_INDEX(index)}; return { value: (el.value || '').toString(), text: (el.closest('[id]') || el).innerText.trim().slice(0, 120), tag: el.tagName.toLowerCase() } })()`, true)) as any
+    const before = (await this.ev(win, `(() => { const el = ${FIELD_BY_INDEX(index)}; return { value: (el.value || '').toString(), text: (el.closest('[id]') || el).innerText.trim().slice(0, 120), tag: el.tagName.toLowerCase() } })()`, true)) as any
 
     // Нативный select — просто ставим значение; если это лишь скрытый select
     // внутри PrimeNG-компонента, идём в оверлей.
     if (String(before.tag) === 'select') {
-      const res = (await win.webContents.executeJavaScript(
+      const res = (await this.ev(win, 
         String.raw`(() => {
           const el = ${FIELD_BY_INDEX(index)}
           const want = ${JSON.stringify(optionText)}
@@ -795,12 +866,12 @@ export class BrowserAutomation {
     }
 
     // Кастомный компонент: если оверлей уже открыт — не переключаем его закрытым.
-    const alreadyOpen = (await win.webContents.executeJavaScript(
+    const alreadyOpen = (await this.ev(win, 
       String.raw`(() => [...document.querySelectorAll('.p-dropdown-panel [role=option], .p-select-overlay [role=option], .p-autocomplete-panel [role=option], .p-multiselect-panel [role=option], [role=listbox] [role=option]')].some((n) => n.getBoundingClientRect().width > 0))()`,
       true,
     )) as boolean
     if (!alreadyOpen) {
-      await win.webContents.executeJavaScript(
+      await this.ev(win, 
         `(() => {
           const el = ${FIELD_BY_INDEX(index)}
           const control = el.closest('.p-select, .p-dropdown, .p-autocomplete, .p-multiselect, .p-treeselect') || el.parentElement || el
@@ -813,7 +884,7 @@ export class BrowserAutomation {
       )
       await new Promise((r) => setTimeout(r, 450))
     }
-    const picked = (await win.webContents.executeJavaScript(
+    const picked = (await this.ev(win, 
       String.raw`(() => {
         const want = ${JSON.stringify(optionText)}
         const norm = (x) => String(x || '').trim().toLowerCase()
@@ -831,7 +902,7 @@ export class BrowserAutomation {
       true,
     )) as any
     await new Promise((r) => setTimeout(r, 400))
-    const after = (await win.webContents.executeJavaScript(
+    const after = (await this.ev(win, 
       `(() => { const el = ${FIELD_BY_INDEX(index)}; const control = el.closest('.p-select, .p-dropdown, .p-autocomplete, .p-multiselect'); return { value: (el.value || '').toString(), text: control ? control.innerText.trim().slice(0, 120) : (el.closest('[id]') || el).innerText.trim().slice(0, 120) } })()`,
       true,
     )) as any
@@ -850,7 +921,7 @@ export class BrowserAutomation {
     const win = this.ensureWindow(false)
     const yearMatch = /^(\d{4})/.exec(value)
     const year = yearMatch?.[1]
-    await win.webContents.executeJavaScript(
+    await this.ev(win, 
       `(() => {
         const el = ${FIELD_BY_INDEX(index)}
         const wrap = el.closest('.p-calendar') || el.parentElement
@@ -863,7 +934,7 @@ export class BrowserAutomation {
     )
     await new Promise((r) => setTimeout(r, 400))
     for (let attempt = 0; attempt < 14; attempt++) {
-      const state = (await win.webContents.executeJavaScript(
+      const state = (await this.ev(win, 
         `(() => {
           const panel = document.querySelector('.p-datepicker')
           if (!panel) return { open: false }
@@ -874,24 +945,24 @@ export class BrowserAutomation {
         true,
       )) as { open: boolean; years?: string[]; days?: number; head?: string }
       if (!state.open) {
-        const after = (await win.webContents.executeJavaScript(`(${FIELD_BY_INDEX(index)}).value`, true)) as string
+        const after = (await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) as string
         return { ok: String(after ?? '') === value, note: `Значение в поле: «${after ?? ''}»` }
       }
       if (year && state.years?.length) {
         if (state.years.includes(year)) {
-          await win.webContents.executeJavaScript(
+          await this.ev(win, 
             `(() => { const p = document.querySelector('.p-datepicker'); const c = [...p.querySelectorAll('.p-yearpicker-year')].find((e) => e.innerText.trim() === ${JSON.stringify(year)}); c && c.click(); return true })()`,
             true,
           )
           await new Promise((r) => setTimeout(r, 350))
-          const after = (await win.webContents.executeJavaScript(`(${FIELD_BY_INDEX(index)}).value`, true)) as string
+          const after = (await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) as string
           if (String(after ?? '') === year) return { ok: true, note: `Выбран год ${year}` }
           return { ok: false, note: `После выбора года в поле «${after ?? ''}»` }
         }
         const min = Number(state.years[0])
         const max = Number(state.years[state.years.length - 1])
         const dir = Number(year) < min ? 'prev' : 'next'
-        await win.webContents.executeJavaScript(
+        await this.ev(win, 
           `(() => { const p = document.querySelector('.p-datepicker'); const b = p && (p.querySelector('.p-datepicker-' + ${JSON.stringify(dir)}) || p.querySelector('[class*=' + ${JSON.stringify(dir)} + ']')); b && b.click(); return !!b })()`,
           true,
         )
@@ -903,7 +974,7 @@ export class BrowserAutomation {
         const m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/.exec(value)
         if (m) {
           const day = m[1]
-          const clicked = await win.webContents.executeJavaScript(
+          const clicked = await this.ev(win, 
             `(() => {
               const p = document.querySelector('.p-datepicker')
               const cells = [...p.querySelectorAll('td')].filter((td) => td.innerText.trim())
@@ -915,7 +986,7 @@ export class BrowserAutomation {
           )
           await new Promise((r) => setTimeout(r, 300))
           if (clicked) {
-            const after = (await win.webContents.executeJavaScript(`(${FIELD_BY_INDEX(index)}).value`, true)) as string
+            const after = (await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) as string
             return { ok: Boolean(after), note: `Выбрана дата: «${after ?? ''}»` }
           }
         }

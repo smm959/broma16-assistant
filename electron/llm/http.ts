@@ -14,7 +14,7 @@ export function friendlyHttpError(status: number, body: string, provider: string
   if (status === 401 || status === 403) {
     return new LlmError(`Ключ ${provider} отклонён (${status}). Проверьте, что ключ скопирован полностью и активен. ${detail}`, 'auth', status)
   }
-  if (status === 402 || /insufficient|balance|quota|credit/i.test(detail)) {
+  if (status === 402 || /insufficient[ _]quota|insufficient[ _]balance|quota (exceeded|exhausted)|credit balance|billing|недостаточно средств|пополни/i.test(detail)) {
     return new LlmError(`Недостаточно средств или исчерпана квота ${provider}. Пополните баланс в личном кабинете провайдера. ${detail}`, 'quota', status)
   }
   if (status === 429) {

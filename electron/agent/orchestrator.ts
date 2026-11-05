@@ -16,7 +16,7 @@ import type {
   PendingAction,
   SourceRef,
 } from '../../shared/types.js'
-import { TOOLS, toolMap, type ToolContext, type ToolDef } from './tools.js'
+import { TOOLS, toolMap, type ToolContext, type ToolDef, type ToolResult } from './tools.js'
 import { secrets } from '../security/secrets.js'
 import { buildSystemPrompt, readSettings } from './prompt.js'
 
@@ -66,7 +66,7 @@ const TOOL_LABELS: Record<string, string> = {
   export_text: 'Сохраняю файл',
 }
 
-const MAX_STEPS = 8
+const MAX_STEPS = 16
 const HISTORY_MESSAGES = 40
 const TOOL_RESULT_LIMIT = 24_000
 
@@ -119,6 +119,7 @@ export class AgentOrchestrator {
     return this.deps.db
       .all<any>(`SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at LIMIT 500`, conversationId)
       .filter((r) => r.role !== 'tool')
+      .filter((r) => r.role !== 'assistant' || String(r.content ?? '').trim())
       .map((r) => ({
         id: r.id,
         conversationId: r.conversation_id,
@@ -234,6 +235,7 @@ export class AgentOrchestrator {
     this.events.runtime({ running: true, conversationId, phase: 'thinking', currentActivity: 'Анализирую задачу' })
     this.logActivity(conversationId, 'thinking', 'Анализирую задачу и контекст')
 
+    let finished = false
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
         const messages = await this.buildHistory(conversationId)
@@ -286,7 +288,10 @@ export class AgentOrchestrator {
           this.deps.db.run(`UPDATE conversations SET updated_at = ? WHERE id = ?`, Date.now(), conversationId)
         }
 
-        if (!calls.length) break
+        if (!calls.length) {
+          finished = true
+          break
+        }
 
         let stopped = false
         for (let i = 0; i < calls.length; i++) {
@@ -316,7 +321,7 @@ export class AgentOrchestrator {
           const started = Date.now()
           this.logActivity(conversationId, 'tool', TOOL_LABELS[call.name] ?? `Выполняю ${call.name}`, { tool: call.name })
           try {
-            const res = await def.run(args, this.toolContext(conversationId))
+            const res = await this.runTool(def, args, this.toolContext(conversationId))
             this.lastSources = res.sources ?? []
             const content = res.content.length > TOOL_RESULT_LIMIT ? res.content.slice(0, TOOL_RESULT_LIMIT) + '\n…[обрезано]' : res.content
             this.saveToolResult(conversationId, call, content)
@@ -346,6 +351,12 @@ export class AgentOrchestrator {
           this.events.runtime({ running: false, conversationId, phase: 'awaiting_user', currentActivity: 'Ожидаю подтверждения' })
           return
         }
+      }
+      if (!finished) {
+        this.postAssistant(
+          conversationId,
+          `Остановился на лимите шагов (${MAX_STEPS}), чтобы не зацикливаться. Напишите «продолжай» — вернусь к задаче с места, где остановился.`,
+        )
       }
     } finally {
       this.controllers.delete(conversationId)
@@ -417,13 +428,56 @@ export class AgentOrchestrator {
         out.push({ role: 'user', content: content + docText + audioText + visionText })
       }
     }
-    return out
+
+    // Если предыдущее выполнение прервалось, у assistant.tool_calls может не быть ответов —
+    // подставляем заглушки, иначе провайдер отвергает всю историю.
+    const fixed: LlmMessage[] = []
+    for (let i = 0; i < out.length; i++) {
+      const m = out[i]!
+      fixed.push(m)
+      if (m.role === 'assistant' && m.toolCalls?.length) {
+        const missing = new Set(m.toolCalls.map((c) => c.id))
+        while (i + 1 < out.length && out[i + 1]!.role === 'tool') {
+          const t = out[++i] as Extract<LlmMessage, { role: 'tool' }>
+          fixed.push(t)
+          missing.delete(t.toolCallId)
+        }
+        for (const id of missing) {
+          fixed.push({ role: 'tool', toolCallId: id, name: 'tool', content: 'Не выполнено: выполнение прервалось (таймаут или перезапуск приложения).' })
+        }
+      }
+    }
+    return fixed
   }
 
   /**
    * Если основная модель текстовая (DeepSeek), изображения описывает отдельная
    * vision-модель, а результат кэшируется в chat_attachments.extracted_text.
    */
+  /** Инструмент не должен подвешивать диалог: ограничиваем выполнение по времени. */
+  private async runTool(def: ToolDef, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    const timeoutMs = 60_000
+    let timer: NodeJS.Timeout | undefined
+    try {
+      return await Promise.race([
+        def.run(args, ctx),
+        new Promise<ToolResult>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  'Инструмент не ответил за 60 секунд — похоже, страница кабинета зависла. Переоткрой кабинет (account_open) и повтори действие.',
+                ),
+              ),
+            timeoutMs,
+          )
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
   private async describeImages(atts: AttachmentRef[], allowNew: boolean, hint: string): Promise<string> {
     const images = atts.filter((a) => a.kind === 'image' && a.path)
     if (!images.length) return ''
@@ -567,7 +621,7 @@ export class AgentOrchestrator {
     const started = Date.now()
     try {
       const { __callId, ...args } = action.params as any
-      const res = await def.run(args, this.toolContext(action.conversationId ?? ''))
+      const res = await this.runTool(def, args, this.toolContext(action.conversationId ?? ''))
       this.deps.db.run(`UPDATE pending_actions SET status = 'done', result = ? WHERE id = ?`, res.content.slice(0, 4000), actionId)
       const placeholder = this.deps.db.get<any>(`SELECT placeholder_id FROM pending_actions WHERE id = ?`, actionId)
       if (placeholder?.placeholder_id) {
