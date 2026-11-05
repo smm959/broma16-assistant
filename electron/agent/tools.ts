@@ -6,6 +6,7 @@ import type { FileService } from '../files/index.js'
 import type { SourceRef, AttachmentRef } from '../../shared/types.js'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, existsSync } from 'node:fs'
+import { autoLogin } from '../browser/login.js'
 
 export type Risk = 'safe' | 'confirm'
 
@@ -394,13 +395,29 @@ export const TOOLS: ToolDef[] = [
   /* ---------------------------- Аккаунт Broma 16 ---------------------------- */
   {
     name: 'account_open',
-    description: 'Открыть личный кабинет Broma 16 в управляемом браузере (пользователь может войти сам).',
+    description:
+      'Открыть личный кабинет Broma 16. Если в настройках сохранён вход, приложение само подставит логин/пароль и код из почты и попробует войти.',
     risk: 'safe',
     parameters: obj({ url: str('URL (по умолчанию портал дистрибуции)') }),
     run: async (args, ctx) => {
       const url = typeof args.url === 'string' && args.url.startsWith('http') ? args.url : undefined
+      const creds = ctx.accountCredentials()
+      if (creds.login && creds.password) {
+        const res = await autoLogin({ browser: ctx.browser, email: ctx.email, credentials: creds }, { url, show: true })
+        return {
+          content: [
+            `Кабинет открыт. Шаги: ${res.steps.join('; ')}.`,
+            res.note,
+            res.loggedIn
+              ? 'Можно продолжать: прочитай страницу (account_read) и веди пользователя по задаче.'
+              : 'Если нужен ручной шаг (2FA-приложение, CAPTCHA) — попроси пользователя завершить вход в открытом окне.',
+          ].join('\n'),
+        }
+      }
       const r = await ctx.browser.open(url)
-      return { content: `Открыт браузер: ${r.url} («${r.title}»). Если нужен вход — попроси пользователя войти в открытом окне.` }
+      return {
+        content: `Открыт браузер: ${r.url} («${r.title}»). Сохранённого входа нет — попроси пользователя войти в открытом окне или включить «Запоминать вход» в настройках.`,
+      }
     },
   },
   {
@@ -418,14 +435,9 @@ export const TOOLS: ToolDef[] = [
             'Сохранённого входа нет. Попроси пользователя включить «Запоминать вход» в «Настройки → Аккаунт Broma 16» и сохранить логин/пароль.',
         }
       }
-      await ctx.browser.open('https://africa.broma16.com/proceed', true)
-      const page = await ctx.browser.read()
-      if (page.loggedIn) return { content: 'Сессия кабинета уже активна — вход не требуется.' }
-      const r = await ctx.browser.fillLogin(creds.login, creds.password)
+      const res = await autoLogin({ browser: ctx.browser, email: ctx.email, credentials: creds }, { show: true })
       return {
-        content: r.ok
-          ? `${r.note}. Если появился запрос 2FA/CAPTCHA — пользователь проходит его сам, дальше продолжи чтение страницы.`
-          : `Не удалось заполнить форму входа: ${r.note}`,
+        content: [`Шаги: ${res.steps.join('; ')}.`, res.note, res.loggedIn ? 'Вход выполнен.' : 'Нужен ручной шаг — попроси пользователя помочь в окне браузера.'].join('\n'),
       }
     },
   },

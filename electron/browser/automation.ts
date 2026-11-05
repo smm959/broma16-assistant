@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import type { BrowserAccountState } from '../../shared/types.js'
 
 const PARTITION = 'persist:broma16'
-export const PORTAL_URL = 'https://africa.broma16.com/proceed'
+export const LOGIN_URL = 'https://rod.broma16.com/login'
+export const PORTAL_URL = 'https://rod.broma16.com/'
+export const SIGNUP_URL = 'https://africa.broma16.com/proceed'
 export const SITE_URL = 'https://broma16.com/'
 
 /**
@@ -42,6 +44,12 @@ export class BrowserAutomation {
     this.win.on('closed', () => {
       this.win = null
     })
+    // Портал может открывать вход/оплату через window.open — ведём всё в этом же окне,
+    // иначе появляется «новое окно» без сохранённой сессии и автозаполнения.
+    this.win.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:/i.test(url)) setTimeout(() => void this.open(url, true), 50)
+      return { action: 'deny' }
+    })
     this.win.webContents.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
     )
@@ -62,32 +70,58 @@ export class BrowserAutomation {
     title: string
     text: string
     loggedIn: boolean
+    hasPasswordField: boolean
+    hasOtpField: boolean
     links: { text: string; href: string }[]
   }> {
     const win = this.ensureWindow(false)
     if (win.webContents.isLoading()) {
       await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
     }
-    const data = await win.webContents.executeJavaScript(
+    const data = (await win.webContents.executeJavaScript(
       `(() => {
         const text = document.body ? document.body.innerText : ''
         const links = [...document.querySelectorAll('a[href]')].slice(0, 80).map(a => ({ text: (a.innerText||'').trim().slice(0,80), href: a.href }))
-        return { url: location.href, title: document.title, text, links }
+        const visible = (el) => {
+          const r = el.getBoundingClientRect()
+          const st = getComputedStyle(el)
+          return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'
+        }
+        const visibleInputs = [...document.querySelectorAll('input')].filter(visible)
+        const hasPasswordField = visibleInputs.some((el) => el.type === 'password')
+        const otpRe = /(code|otp|2fa|verif|token|код|подтвержд)/i
+        const hasOtpField = visibleInputs.some((el) =>
+          el.type === 'tel' || el.inputMode === 'numeric' ||
+          otpRe.test((el.name || '') + (el.id || '') + (el.placeholder || '') + (el.autocomplete || '') + ((el.labels && el.labels[0] && el.labels[0].innerText) || '')),
+        )
+        return { url: location.href, title: document.title, text, links, hasPasswordField, hasOtpField }
       })()`,
       true,
-    )
+    )) as any
     this.lastUrl = data.url
     this.lastTitle = data.title
     this.lastText = data.text ?? ''
-    const haystack = `${data.url} ${this.lastText.slice(0, 20000)}`.toLowerCase()
+    const text = String(this.lastText)
+    const url = String(data.url)
+    const loginUrl = /(login|sign[-_]?in|signin|\/auth|войти)/i.test(url)
+    const accountSignals = /(logout|log out|sign out|выйти|выход|my releases|мои релизы|dashboard|личный кабинет|account settings|профиль|statistics|статистик)/i.test(
+      text.slice(0, 20000),
+    )
+    const accountUrl = /(dashboard|\/account|\/releases|cabinet|\/profile)/i.test(url)
+    const marketing = /(proceed to sign up|create an account|создать аккаунт|регистрац)/i.test(text.slice(0, 800))
     const loggedIn =
-      /logout|log out|выход|sign out|dashboard|личный кабинет|my releases|мои релизы/.test(haystack) &&
-      !/sign in|log in|войти|password|пароль/.test(data.url.toLowerCase())
+      !data.hasPasswordField &&
+      !data.hasOtpField &&
+      !loginUrl &&
+      (accountSignals || accountUrl) &&
+      !(marketing && !/logout|выйти/i.test(text.slice(0, 20000)))
     return {
       url: data.url,
       title: data.title,
       text: String(this.lastText).slice(0, options.maxChars ?? 30_000),
       loggedIn,
+      hasPasswordField: Boolean(data.hasPasswordField),
+      hasOtpField: Boolean(data.hasOtpField),
       links: data.links ?? [],
     }
   }
@@ -203,6 +237,117 @@ export class BrowserAutomation {
       note: `Заполнено полей: ${result.fields}${result.hasPassword ? ' (логин и пароль)' : ' (пароль не найден)'}`,
       fields: result.fields,
     }
+  }
+
+  /** Заполняет поле(я) кода подтверждения (OTP), включая формы из нескольких однозначных ячеек. */
+  async fillOtp(code: string): Promise<{ ok: boolean; note: string; fields: number }> {
+    const win = this.ensureWindow(false)
+    if (win.webContents.isLoading()) {
+      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
+    }
+    const result = (await win.webContents.executeJavaScript(
+      `(() => {
+        const code = ${JSON.stringify(code)}
+        const visible = (el) => {
+          const r = el.getBoundingClientRect()
+          const st = getComputedStyle(el)
+          return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'
+        }
+        const setValue = (el, value) => {
+          const proto = HTMLInputElement.prototype
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+          setter ? setter.call(el, value) : (el.value = value)
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          el.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+        const otpRe = /(code|otp|2fa|verif|token|код|подтвержд)/i
+        const inputs = [...document.querySelectorAll('input')].filter(visible).filter((el) =>
+          el.type === 'tel' || el.inputMode === 'numeric' ||
+          otpRe.test((el.name || '') + (el.id || '') + (el.placeholder || '') + (el.autocomplete || '') + ((el.labels && el.labels[0] && el.labels[0].innerText) || '')),
+        )
+        if (!inputs.length) return { fields: 0, multi: false }
+        if (inputs.length > 1) {
+          inputs.forEach((el, i) => setValue(el, code[i] || ''))
+          inputs[0].focus()
+          return { fields: inputs.length, multi: true }
+        }
+        setValue(inputs[0], code)
+        inputs[0].focus()
+        return { fields: 1, multi: false }
+      })()`,
+      true,
+    )) as { fields: number; multi: boolean }
+    if (!result.fields) return { ok: false, note: 'Поле кода не найдено', fields: 0 }
+    return { ok: true, note: result.multi ? `Код распределён по ${result.fields} ячейкам` : 'Код подставлен', fields: result.fields }
+  }
+
+  /** Нажимает кнопку отправки формы входа/кода (или Enter), чтобы завершить шаг. */
+  async submitForm(kind: 'login' | 'otp' = 'login'): Promise<{ ok: boolean; note: string }> {
+    const win = this.ensureWindow(false)
+    if (win.webContents.isLoading()) {
+      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
+    }
+    const result = (await win.webContents.executeJavaScript(
+      `(() => {
+        const kind = ${JSON.stringify(kind)}
+        const visible = (el) => {
+          const r = el.getBoundingClientRect()
+          const st = getComputedStyle(el)
+          return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'
+        }
+        const otpRe = /(code|otp|2fa|verif|token|код|подтвержд)/i
+        const inputs = [...document.querySelectorAll('input')].filter(visible)
+        const target = kind === 'login'
+          ? inputs.find((el) => el.type === 'password') || inputs.find((el) => el.type === 'email')
+          : inputs.find((el) => otpRe.test((el.name || '') + (el.id || '') + (el.placeholder || '') + (el.autocomplete || '')) || el.inputMode === 'numeric')
+        const form = target && target.closest('form')
+        const submitRe = /(войти|вход|продолж|подтверд|далее|log ?in|sign ?in|continue|submit|verify|confirm|next)/i
+        const buttons = [...document.querySelectorAll('button, input[type=submit], [role=button]')].filter(visible)
+        const submitBtn = buttons.find((b) => submitRe.test((b.innerText || b.value || '').trim()))
+        if (form && form.requestSubmit) { form.requestSubmit(submitBtn || undefined); return { ok: true, note: 'Форма отправлена' } }
+        if (submitBtn) { submitBtn.click(); return { ok: true, note: 'Нажата кнопка ' + (submitBtn.innerText || submitBtn.value || '').trim().slice(0, 40) } }
+        if (form && form.submit) { form.submit(); return { ok: true, note: 'Форма отправлена' } }
+        if (target) {
+          target.focus()
+          for (const type of ['keydown', 'keypress', 'keyup']) {
+            target.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
+          }
+          return { ok: true, note: 'Нажат Enter' }
+        }
+        return { ok: false, note: 'Кнопка входа не найдена' }
+      })()`,
+      true,
+    )) as { ok: boolean; note: string }
+    await new Promise((r) => setTimeout(r, 2500))
+    return result
+  }
+
+  /** Ждёт завершения входа: опрашивает страницу, пока не появится кабинет или ошибка. */
+  async waitForLoggedIn(timeoutMs = 12_000): Promise<{
+    loggedIn: boolean
+    page: Awaited<ReturnType<BrowserAutomation['read']>>
+  }> {
+    const started = Date.now()
+    let page = await this.read({ maxChars: 20_000 })
+    while (!page.loggedIn && Date.now() - started < timeoutMs) {
+      if (page.hasOtpField && !page.hasPasswordField) break
+      if (/неверн|incorrect|invalid|ошибк|error/i.test(page.text.slice(0, 1200))) break
+      await new Promise((r) => setTimeout(r, 700))
+      page = await this.read({ maxChars: 20_000 })
+    }
+    return { loggedIn: page.loggedIn, page }
+  }
+
+  /** Ждёт, пока страница изменится (навигация/перерисовка) или истечёт таймаут. */
+  async waitForChange(previousUrl: string, previousTextHash: number, timeoutMs = 8000): Promise<boolean> {
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const page = await this.read({ maxChars: 4000 })
+      const hash = page.text.length + page.text.charCodeAt(0) * 31
+      if (page.url !== previousUrl || hash !== previousTextHash) return true
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    return false
   }
 
   /**

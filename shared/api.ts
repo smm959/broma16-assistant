@@ -47,7 +47,7 @@ export interface Api {
     }>
     save(input: { login: string; password?: string; remember: boolean; openOnStart: boolean }): Promise<any>
     forget(): Promise<any>
-    autoLogin(): Promise<{ ok: boolean; loggedIn: boolean; filled: number; note: string }>
+    autoLogin(): Promise<{ ok: boolean; loggedIn: boolean; steps: string[]; note: string; needsUser?: boolean }>
   }
   vision: {
     get(): Promise<VisionState | null>

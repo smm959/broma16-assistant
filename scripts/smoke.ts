@@ -106,8 +106,39 @@ app.whenReady().then(async () => {
     svc.saveSettings({ accountLogin: 'music959@example.com', rememberAccount: true })
     const { secrets: secretsMod } = await import('../electron/security/secrets.js')
     secretsMod().set('broma:password', 'super-secret-pass')
-    check('Пароль кабинета хранится в секретах', secretsMod().get('broma:password') === 'super-secret-pass' && secretsMod().hint('broma:password')?.includes('pass'))
+    check('Пароль кабинета хранится в секретах', secretsMod().get('broma:password') === 'super-secret-pass' && Boolean(secretsMod().hint('broma:password')?.includes('pass')))
     check('Логин сохранён в настройках', svc.settings().accountLogin === 'music959@example.com' && svc.settings().rememberAccount === 'true')
+
+    /* ---------------- полный автовход с кодом из почты ---------------- */
+    const { autoLogin } = await import('../electron/browser/login.js')
+    svc.db.run(
+      `INSERT INTO email_messages (id, account_id, uid, folder, direction, sender, sender_name, recipient, subject, body_text, body_html, date, department, category, is_broma16, flags, attachments, created_at)
+       VALUES ('em_test_code', 'acc_test', '1', 'INBOX', 'incoming', 'no-reply@broma16.com', 'Broma 16', 'me@example.com', 'Код подтверждения', 'Ваш код для входа: 123456. Действует 10 минут.', '', ?, 'Support', 'account', 1, '[]', '[]', ?)`,
+      Date.now(),
+      Date.now(),
+    )
+    await svc.email.saveAccount({
+      label: 'Smoke Inbox',
+      email: 'smoke@example.com',
+      username: 'smoke@example.com',
+      imapHost: '127.0.0.1',
+      imapPort: 1993,
+      smtpHost: '127.0.0.1',
+      smtpPort: 2525,
+      password: 'smoke-pass',
+    })
+    const codeFound = svc.email.findVerificationCode(30)
+    check('Код подтверждения найден в письме', codeFound?.code === '123456', codeFound?.subject)
+    const loginFlow = await autoLogin(
+      { browser: svc.browser, email: svc.email, credentials: { login: 'music959@example.com', password: 'super-secret-pass' } },
+      { url: 'file://' + join(process.cwd(), 'test-fixtures', 'login-flow.html'), show: false, waitMs: 1200 },
+    )
+    await new Promise((r) => setTimeout(r, 1500))
+    check(
+      'Автовход проходит логин и код подтверждения',
+      loginFlow.loggedIn && loginFlow.steps.some((x) => /код/i.test(x)),
+      `${loginFlow.note} :: ${loginFlow.steps.join('; ')}`,
+    )
 
     /* ---------------- vision fallback ---------------- */
     const visionServer = createServer((req, res) => {

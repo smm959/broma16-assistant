@@ -375,6 +375,48 @@ export class EmailService {
     }
   }
 
+  /**
+   * Ищет код подтверждения в свежих входящих письмах (для входа в кабинет).
+   * Код не покидает main-процесс — отдаём его только внутреннему автологину.
+   */
+  findVerificationCode(
+    minutes = 20,
+    sinceTs?: number,
+  ): { code: string; subject: string; from: string; date: number; department?: string } | null {
+    const since = Math.max(sinceTs ?? 0, Date.now() - minutes * 60_000)
+    const rows = this.db.all<any>(
+      `SELECT * FROM email_messages WHERE direction = 'incoming' AND date >= ? ORDER BY date DESC LIMIT 40`,
+      since,
+    )
+    const patterns = [
+      /(?:код|code|verification|verify|подтвержд\w*|otp|pin|sign[- ]?in)[^\d]{0,60}(\d{4,8})/i,
+      /(\d{4,8})[^\d]{0,60}(?:код|code|verification|verify|подтвержд)/i,
+    ]
+    const candidates: { code: string; subject: string; from: string; date: number; department?: string; broma: boolean }[] = []
+    for (const r of rows) {
+      const hay = `${r.subject ?? ''}\n${String(r.body_text ?? '').slice(0, 6000)}`
+      for (const re of patterns) {
+        const m = re.exec(hay)
+        if (m?.[1]) {
+          candidates.push({
+            code: m[1],
+            subject: r.subject ?? '',
+            from: r.sender ?? '',
+            date: r.date,
+            department: r.department ?? undefined,
+            broma: Boolean(r.is_broma16) || /broma/i.test(`${r.sender ?? ''} ${r.subject ?? ''}`),
+          })
+          break
+        }
+      }
+      if (candidates.length >= 5) break
+    }
+    if (!candidates.length) return null
+    candidates.sort((a, b) => Number(b.broma) - Number(a.broma) || b.date - a.date)
+    const best = candidates[0]!
+    return { code: best.code, subject: best.subject, from: best.from, date: best.date, department: best.department }
+  }
+
   messages(opts: { query?: string; bromaOnly?: boolean; limit?: number; accountId?: string } = {}): EmailMessage[] {
     const where: string[] = []
     const params: unknown[] = []

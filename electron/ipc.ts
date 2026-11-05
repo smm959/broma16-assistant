@@ -5,7 +5,8 @@ import type { Services } from './services.js'
 import type { ProviderId } from '../shared/types.js'
 import { PROVIDERS } from './llm/presets.js'
 import { EMAIL_PRESETS } from './email/index.js'
-import { PORTAL_URL } from './browser/automation.js'
+import { LOGIN_URL } from './browser/automation.js'
+import { autoLogin } from './browser/login.js'
 import { secrets } from './security/secrets.js'
 import { createHash } from 'node:crypto'
 
@@ -69,17 +70,13 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
     return accountState()
   })
   handle('account:auto-login', async () => {
-    await browser.open(PORTAL_URL, true)
-    const page = await browser.read()
-    if (page.loggedIn) return { ok: true, loggedIn: true, filled: 0, note: 'Сессия уже активна' }
     const st = svc.settings()
-    const password = secrets().get('broma:password')
-    if (!st.accountLogin || !password) {
-      return { ok: false, loggedIn: false, filled: 0, note: 'Вход не сохранён — введите логин и пароль в настройках' }
-    }
-    const filled = await browser.fillLogin(st.accountLogin, password)
-    browser.showWindow()
-    return { ok: filled.ok, loggedIn: false, filled: filled.fields, note: filled.note }
+    const res = await autoLogin(
+      { browser, email, credentials: { login: st.accountLogin ?? '', password: secrets().get('broma:password') } },
+      { url: LOGIN_URL, show: true },
+    )
+    if (res.needsUser) browser.showWindow()
+    return res
   })
 
   handle('provider:save', async (input: any) => llm.saveConnection(input))
