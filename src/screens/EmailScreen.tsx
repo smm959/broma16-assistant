@@ -20,6 +20,60 @@ export default function EmailScreen() {
   const [testResult, setTestResult] = React.useState<string | null>(null)
   const [setup, setSetup] = React.useState<any>({ preset: 'gmail', email: '', password: '', label: 'Моя почта' })
   const [savingAccount, setSavingAccount] = React.useState(false)
+  const [reauth, setReauth] = React.useState<any | null>(null)
+  const [reauthBusy, setReauthBusy] = React.useState(false)
+  const [reauthResult, setReauthResult] = React.useState<string | null>(null)
+
+  const openReauth = () => {
+    const a = accounts[0]
+    if (!a) return
+    setReauthResult(null)
+    setReauth({
+      id: a.id,
+      label: a.label,
+      email: a.email,
+      password: '',
+      imapHost: a.imapHost,
+      imapPort: a.imapPort,
+      smtpHost: a.smtpHost,
+      smtpPort: a.smtpPort,
+      provider: a.provider,
+    })
+  }
+
+  const saveReauth = async () => {
+    if (!reauth) return
+    setReauthBusy(true)
+    setReauthResult(null)
+    try {
+      const accs = await window.api.email.save({
+        id: reauth.id,
+        label: reauth.label,
+        email: reauth.email,
+        username: reauth.email,
+        password: reauth.password || undefined,
+        provider: reauth.provider,
+        imapHost: reauth.imapHost,
+        imapPort: Number(reauth.imapPort),
+        smtpHost: reauth.smtpHost,
+        smtpPort: Number(reauth.smtpPort),
+      })
+      setAccounts(accs)
+      const id = reauth.id
+      const res = await window.api.email.test(id)
+      setReauthResult(`IMAP: ${res.imap} · SMTP: ${res.smtp}`)
+      if (res.imap === 'OK' || res.smtp === 'OK') {
+        app.toast('Почта подключена, синхронизирую…', 'success')
+        await window.api.email.sync(id).catch(() => undefined)
+        await load()
+        setReauth(null)
+      }
+    } catch (e: any) {
+      setReauthResult(`Ошибка: ${e?.message ?? e}`)
+    } finally {
+      setReauthBusy(false)
+    }
+  }
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -170,9 +224,20 @@ export default function EmailScreen() {
           <input type="checkbox" checked={bromaOnly} onChange={(e) => { setBromaOnly(e.target.checked); void search(query, e.target.checked) }} />
           только Broma 16
         </label>
+        <button className="btn" onClick={openReauth} title="Почтовый аккаунт и пароль"><Icon name="settings" size={14} /> Ящик</button>
         <button className="btn" onClick={sync} disabled={syncing}>{syncing ? <Spinner /> : <Icon name="refresh" size={14} />} Синхронизировать</button>
         <button className="btn btn-primary" onClick={() => setCompose({ to: '', subject: '', body: '' })}><Icon name="send" size={14} /> Написать</button>
       </div>
+      {accounts[0]?.status === 'error' && (
+        <div className="banner error" style={{ margin: '12px 26px 0' }}>
+          <Icon name="x" size={15} />
+          <div className="grow">
+            <b>Почтовый сервер отклонил вход.</b>
+            <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 3, whiteSpace: 'pre-wrap' }}>{(accounts[0].lastError ?? '').slice(0, 400)}</div>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={openReauth}>Исправить</button>
+        </div>
+      )}
       <div className="screen-body" style={{ padding: 0, minHeight: 0 }}>
         <div className="email-grid">
           <div>
@@ -243,6 +308,38 @@ export default function EmailScreen() {
           </div>
         </div>
       </div>
+
+      {reauth && (
+        <Modal title="Почтовый аккаунт" onClose={() => setReauth(null)}>
+          <div className="row2">
+            <Field label="Email"><input className="input" value={reauth.email} onChange={(e) => setReauth({ ...reauth, email: e.target.value })} /></Field>
+            <Field label="Название"><input className="input" value={reauth.label} onChange={(e) => setReauth({ ...reauth, label: e.target.value })} /></Field>
+          </div>
+          <Field
+            label="Пароль приложения"
+            hint="Для Gmail: включите 2FA и создайте «пароль приложения» (16 символов) на myaccount.google.com/apppasswords. Обычный пароль Google не подойдёт. Оставьте пустым, чтобы не менять сохранённый."
+          >
+            <input className="input" type="password" value={reauth.password} onChange={(e) => setReauth({ ...reauth, password: e.target.value })} placeholder="xxxx xxxx xxxx xxxx" />
+          </Field>
+          <div className="row2">
+            <Field label="IMAP-сервер"><input className="input" value={reauth.imapHost} onChange={(e) => setReauth({ ...reauth, imapHost: e.target.value })} /></Field>
+            <Field label="Порт IMAP"><input className="input" value={reauth.imapPort} onChange={(e) => setReauth({ ...reauth, imapPort: e.target.value })} /></Field>
+          </div>
+          <div className="row2">
+            <Field label="SMTP-сервер"><input className="input" value={reauth.smtpHost} onChange={(e) => setReauth({ ...reauth, smtpHost: e.target.value })} /></Field>
+            <Field label="Порт SMTP"><input className="input" value={reauth.smtpPort} onChange={(e) => setReauth({ ...reauth, smtpPort: e.target.value })} /></Field>
+          </div>
+          {reauthResult && (
+            <div className="banner" style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}><div className="grow">{reauthResult}</div></div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn" onClick={() => setReauth(null)}>Отмена</button>
+            <button className="btn btn-primary" onClick={saveReauth} disabled={reauthBusy}>
+              {reauthBusy ? <Spinner /> : <Icon name="check" size={14} />} Проверить и сохранить
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {compose && (
         <Modal title="Новое письмо" onClose={() => setCompose(null)} wide>
