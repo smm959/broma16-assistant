@@ -48,7 +48,7 @@
 ## Установка
 
 **macOS (Apple Silicon):** готовый установщик — в разделе [Releases](https://github.com/smm959/broma16-assistant/releases/latest)
-(`Broma 16 Assistant-1.0.0-arm64.dmg`, 128 МБ).
+(`Broma.16.Assistant-1.0.0-arm64.dmg`, 128 МБ).
 
 1. Откройте DMG и перетащите приложение в «Программы».
 2. Сборка не подписана — при первом запуске разрешите её в «Системные настройки → Конфиденциальность и безопасность» (или правый клик → «Открыть»).
@@ -78,9 +78,9 @@ npm run dist:win        # NSIS-установщик + portable .exe появят
 - IMAP/SMTP подключается;
 - `npm run typecheck` и `npm run smoke` проходят (smoke-тест использует локальные фейковые серверы, реальные ключи не нужны).
 
-Куда прислать результат: приложите `.exe`/`.zip` и краткий отчёт к Issue
-**«Windows build»** (создайте новое issue с этим заголовком) либо откройте PR с артефактами
-в `release/`. Мы добавим сборку в Releases и укажем вас в благодарностях.
+Куда прислать результат: приложите `.exe`/`.zip` и краткий отчёт в issue
+**[Windows build: нужна помощь со сборкой установщика](https://github.com/smm959/broma16-assistant/issues/1)**
+либо откройте PR с артефактами. Мы добавим сборку в Releases и укажем вас в благодарностях.
 
 > English: the app supports Windows, but there is no Windows installer yet. If you can run
 > `npm run dist:win` on Windows and share the artifacts in a "Windows build" issue, it would be
