@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-electron/
+release/
+build/icon.icns
+build/icon.ico
+*.log
+.DS_Store
+
+# Исходные ТЗ и рабочие файлы не публикуются
+instruction*.rtf
+*.dmg
+*.blockmap

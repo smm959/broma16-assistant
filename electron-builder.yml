@@ -1,0 +1,27 @@
+appId: com.broma16.assistant
+productName: Broma 16 Assistant
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - "!**/*.map"
+  - "!node_modules/**"
+  - "!dist-electron/smoke.cjs"
+asar: true
+npmRebuild: false
+extraResources:
+  - from: resources
+    to: resources
+mac:
+  category: public.app-category.productivity
+  target: [dmg, zip]
+  hardenedRuntime: false
+win:
+  target: [nsis, portable]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
