@@ -224,6 +224,15 @@ const READ_JS = `(() => {
   return { url: location.href, title: document.title, text, links, hasPasswordField, hasOtpField, logout, wizard }
 })()`
 
+const RU_MONTHS = ['январ', 'феврал', 'март', 'апрел', 'ма', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр']
+function monthIndexFromRussian(text: string): number {
+  const t = String(text || '').toLowerCase()
+  const i = RU_MONTHS.findIndex((m) => m !== 'ма' && t.includes(m))
+  if (i >= 0) return i + 1
+  if (t.includes('май') || t.includes('мая')) return 5
+  return -1
+}
+
 function detectAuth(data: {
   url?: string
   text?: string
@@ -467,8 +476,15 @@ export class BrowserAutomation {
           el = found[0] || null
         } catch (e) {}
         if (!el) {
-          const all = [...document.querySelectorAll('a,button,[role=button],input[type=submit]')].filter(visible)
+          const all = [...document.querySelectorAll('a,button,[role=button],input[type=submit],label,[role=radio],[role=checkbox],.p-radiobutton,.p-checkbox')].filter(visible)
           el = all.find((e) => ((e.innerText || e.value || '').trim().toLowerCase().includes(sel.toLowerCase()))) || null
+        }
+        if (!el) {
+          const generic = [...document.querySelectorAll('div,span,li,p')]
+            .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (e.innerText || '').trim().length > 0 && (e.innerText || '').trim().length < 220 })
+            .filter((e) => (e.innerText || '').trim().toLowerCase().includes(sel.toLowerCase()))
+            .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)
+          el = generic[0] || null
         }
         if (!el) return { found: false }
         return {
@@ -491,8 +507,16 @@ export class BrowserAutomation {
         let el = null
         try { el = document.querySelector(sel) } catch {}
         if (!el) {
-          const all = [...document.querySelectorAll('a,button,[role=button],input[type=submit]')]
+          const all = [...document.querySelectorAll('a,button,[role=button],input[type=submit],label,[role=radio],[role=checkbox],.p-radiobutton,.p-checkbox')]
           el = all.find(e => (e.innerText||e.value||'').trim().toLowerCase().includes(sel.toLowerCase())) || null
+        }
+        if (!el) {
+          // Кастомные радио/чекбоксы бывают обычными div/span — берём самый маленький подходящий.
+          const generic = [...document.querySelectorAll('div,span,li,p')]
+            .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (e.innerText||'').trim().length > 0 && (e.innerText||'').trim().length < 220 })
+            .filter((e) => (e.innerText||'').trim().toLowerCase().includes(sel.toLowerCase()))
+            .sort((a, b) => (a.innerText||'').length - (b.innerText||'').length)
+          el = generic[0] || null
         }
         if (!el) return { ok: false, note: 'Элемент не найден' }
         el.scrollIntoView({ block: 'center' })
@@ -874,7 +898,7 @@ export class BrowserAutomation {
         field: before,
         before: before.value,
         after: String(after ?? ''),
-        verified: String(after ?? '') === String(value).trim() || dateResult.ok,
+        verified: String(after ?? '') === String(value).trim(),
         datepicker: true,
       }
     }
@@ -1162,12 +1186,42 @@ export class BrowserAutomation {
     )) as any
   }
 
-  /** Выбор значения в p-calendar: год или день, с навигацией по десятилетиям/месяцам. */
+  /**
+   * Выбор даты/года в p-calendar. Сначала пробуем прямой ввод (PrimeNG парсит его
+   * и биндит модель), затем — клики по календарю с проверкой итогового значения.
+   */
   private async pickDate(index: number, value: string): Promise<{ ok: boolean; note: string }> {
     const win = this.ensureWindow(false)
-    const yearMatch = /^(\d{4})/.exec(value)
-    const year = yearMatch?.[1]
-    await this.ev(win, 
+    const target = String(value).trim()
+    const readValue = async () => String((await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) ?? '')
+
+    // 1. Прямой ввод в поле.
+    await this.ev(
+      win,
+      String.raw`(() => {
+        const el = ${FIELD_BY_INDEX(index)}
+        el.focus()
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+        setter ? setter.call(el, ${JSON.stringify(target)}) : (el.value = ${JSON.stringify(target)})
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(target)} }))
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+        for (const type of ['keydown', 'keyup']) {
+          el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
+        }
+        el.blur()
+        return el.value
+      })()`,
+      true,
+    )
+    await new Promise((r) => setTimeout(r, 500))
+    let after = await readValue()
+    if (after === target) return { ok: true, note: `Дата введена: «${target}»` }
+
+    // 2. Календарь: навигация по месяцам/десятилетиям и клик по точной дате.
+    const m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/.exec(target)
+    const year = m ? m[3]! : /^\d{4}$/.test(target) ? target : undefined
+    await this.ev(
+      win,
       `(() => {
         const el = ${FIELD_BY_INDEX(index)}
         const wrap = el.closest('.p-calendar') || el.parentElement
@@ -1179,68 +1233,85 @@ export class BrowserAutomation {
       true,
     )
     await new Promise((r) => setTimeout(r, 400))
-    for (let attempt = 0; attempt < 14; attempt++) {
-      const state = (await this.ev(win, 
+
+    for (let attempt = 0; attempt < 26; attempt++) {
+      const state = (await this.ev(
+        win,
         `(() => {
           const panel = document.querySelector('.p-datepicker')
           if (!panel) return { open: false }
-          const years = [...panel.querySelectorAll('.p-yearpicker-year')].map((e) => e.innerText.trim())
-          const days = [...panel.querySelectorAll('td')].filter((td) => td.innerText.trim()).length
-          return { open: true, years, days, head: panel.innerText.slice(0, 40) }
+          return {
+            open: true,
+            years: [...panel.querySelectorAll('.p-yearpicker-year')].map((e) => e.innerText.trim()),
+            days: [...panel.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label')),
+            head: panel.innerText.slice(0, 40),
+          }
         })()`,
         true,
-      )) as { open: boolean; years?: string[]; days?: number; head?: string }
-      if (!state.open) {
-        const after = (await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) as string
-        return { ok: String(after ?? '') === value, note: `Значение в поле: «${after ?? ''}»` }
-      }
-      if (year && state.years?.length) {
+      )) as { open: boolean; years?: string[]; days?: string[]; head?: string }
+      if (!state.open) break
+
+      if (state.years?.length && year) {
         if (state.years.includes(year)) {
-          await this.ev(win, 
+          await this.ev(
+            win,
             `(() => { const p = document.querySelector('.p-datepicker'); const c = [...p.querySelectorAll('.p-yearpicker-year')].find((e) => e.innerText.trim() === ${JSON.stringify(year)}); c && c.click(); return true })()`,
             true,
           )
-          await new Promise((r) => setTimeout(r, 350))
-          const after = (await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) as string
-          if (String(after ?? '') === year) return { ok: true, note: `Выбран год ${year}` }
-          return { ok: false, note: `После выбора года в поле «${after ?? ''}»` }
-        }
-        const min = Number(state.years[0])
-        const max = Number(state.years[state.years.length - 1])
-        const dir = Number(year) < min ? 'prev' : 'next'
-        await this.ev(win, 
-          `(() => { const p = document.querySelector('.p-datepicker'); const b = p && (p.querySelector('.p-datepicker-' + ${JSON.stringify(dir)}) || p.querySelector('[class*=' + ${JSON.stringify(dir)} + ']')); b && b.click(); return !!b })()`,
-          true,
-        )
-        await new Promise((r) => setTimeout(r, 300))
-        continue
-      }
-      if (state.days) {
-        // Полный календарь: ищем ячейку с нужным днём (dd.mm.yyyy).
-        const m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/.exec(value)
-        if (m) {
-          const day = m[1]
-          const clicked = await this.ev(win, 
-            `(() => {
-              const p = document.querySelector('.p-datepicker')
-              const cells = [...p.querySelectorAll('td')].filter((td) => td.innerText.trim())
-              const cell = cells.find((td) => td.innerText.trim() === ${JSON.stringify(day)})
-              if (!cell) return false
-              cell.click(); return true
-            })()`,
+          await new Promise((r) => setTimeout(r, 400))
+        } else {
+          const min = Number(state.years[0])
+          const max = Number(state.years[state.years.length - 1])
+          const dir = Number(year) < min ? 'prev' : 'next'
+          await this.ev(
+            win,
+            `(() => { const p = document.querySelector('.p-datepicker'); const b = p && (p.querySelector('.p-datepicker-' + ${JSON.stringify(dir)}) || p.querySelector('[class*=' + ${JSON.stringify(dir)} + ']')); b && b.click(); return !!b })()`,
             true,
           )
           await new Promise((r) => setTimeout(r, 300))
-          if (clicked) {
-            const after = (await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) as string
-            return { ok: Boolean(after), note: `Выбрана дата: «${after ?? ''}»` }
-          }
+          continue
         }
+      } else if (m && state.days?.length) {
+        // Точная дата: ищем ячейку по aria-label «dd.mm.yyyy», иначе листаем месяцы.
+        const clicked = await this.ev(
+          win,
+          `(() => {
+            const p = document.querySelector('.p-datepicker')
+            if (!p) return false
+            const exact = [...p.querySelectorAll('[aria-label]')].find((e) => (e.getAttribute('aria-label') || '').trim() === ${JSON.stringify(`${m[1]!.padStart(2, '0')}.${m[2]!.padStart(2, '0')}.${m[3]}`)})
+            if (exact) { (exact.closest('td') || exact).click(); return true }
+            return false
+          })()`,
+          true,
+        )
+        await new Promise((r) => setTimeout(r, 400))
+        if (clicked) {
+          after = await readValue()
+          if (after === target) return { ok: true, note: `Дата выбрана в календаре: «${after}»` }
+          return { ok: false, note: `Календарь закрылся со значением «${after}» вместо «${target}»` }
+        }
+        // Листаем вперёд/назад в зависимости от того, раньше или позже текущий месяц.
+        const head = String(state.head || '')
+        const targetMonth = Number(m[2])
+        const current = monthIndexFromRussian(head.split(/\d{4}/)[0] || '')
+        const dir = current >= 0 && targetMonth < current ? 'prev' : 'next'
+        await this.ev(
+          win,
+          `(() => { const p = document.querySelector('.p-datepicker'); const b = [...p.querySelectorAll('[aria-label]')].find((e) => (e.getAttribute('aria-label') || '').toLowerCase().includes(${JSON.stringify(dir === 'prev' ? 'предыдущий месяц' : 'следующий месяц')})); b && b.click(); return !!b })()`,
+          true,
+        )
+        await new Promise((r) => setTimeout(r, 350))
+      } else {
         break
       }
-      break
+
+      if (year && !m) {
+        after = await readValue()
+        if (after === target) return { ok: true, note: `Выбран год ${target}` }
+      }
     }
-    return { ok: false, note: 'Не удалось выбрать дату в календаре' }
+    after = await readValue()
+    return { ok: after === target, note: `Значение в поле: «${after}»` }
   }
 
   state(): BrowserAccountState {

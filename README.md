@@ -1,6 +1,6 @@
 # Broma 16 Assistant
 
-![macOS build](https://img.shields.io/badge/macOS-DMG%20v1.6.3-black?logo=apple)
+![macOS build](https://img.shields.io/badge/macOS-DMG%20v1.6.4-black?logo=apple)
 ![Windows build](https://img.shields.io/badge/Windows-build%20help%20wanted-yellow)
 
 Персональный desktop-ассистент для работы с музыкальным дистрибьютором **Broma 16**: релизы, отчёты, выплаты, питчинг, Content ID, YouTube, тексты песен и поддержка — в одном окне, обычным языком.
@@ -10,7 +10,7 @@
 ![Подключение AI](docs/screenshots/01-connect.png)
 ![Чат с агентом](docs/screenshots/02-chat.png)
 
-**Что нового в 1.6.3:** агент видит все файлы диалога (обложка/WAV) и не «забывает» их; чекбокс «Релиз ранее уже был опубликован» больше не принимается за финальную отправку.
+**Что нового в 1.6.4:** точная дата релиза выставляется на шаге «Дистрибуция» (ввод даты + выбор в календаре), клики работают по кастомным радио/чекбоксам без role/button.
 
 ---
 
@@ -56,12 +56,12 @@
 ## Установка
 
 **macOS (Apple Silicon):** готовый установщик — в разделе [Releases](https://github.com/smm959/broma16-assistant/releases/latest)
-(`Broma.16.Assistant-1.6.3-arm64.dmg`, ~128 МБ).
+(`Broma.16.Assistant-1.6.4-arm64.dmg`, ~128 МБ).
 
 1. Откройте DMG и перетащите приложение в «Программы».
 2. Сборка не подписана — при первом запуске разрешите её в «Системные настройки → Конфиденциальность и безопасность» (или правый клик → «Открыть»).
 
-SHA-256: `190b15b1887a0d3334745ef576172511cc3f47b85ff1dca20a30a8e9c9a7d6ea`
+SHA-256: `8e4cb916b7fb74546a7bc8f5e12f69dd506b4cfe7cf2489af03edc0873bb6d36`
 
 **Windows:** установщика пока нет — нужна помощь сообщества, см. раздел ниже.
 
