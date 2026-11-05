@@ -160,6 +160,52 @@ export class BrowserAutomation {
   }
 
   /**
+   * Заполняет форму входа сохранёнными логином и паролем (без отправки).
+   * Пароль никогда не покидает main-процесс и в renderer не возвращается.
+   */
+  async fillLogin(login: string, password: string): Promise<{ ok: boolean; note: string; fields: number }> {
+    const win = this.ensureWindow(false)
+    if (win.webContents.isLoading()) {
+      await new Promise<void>((resolve) => win.webContents.once('did-stop-loading', () => resolve()))
+    }
+    const result = (await win.webContents.executeJavaScript(
+      `(() => {
+        const loginValue = ${JSON.stringify(login)}
+        const passwordValue = ${JSON.stringify(password)}
+        const setValue = (el, value) => {
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+          setter ? setter.call(el, value) : (el.value = value)
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          el.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+        const visible = (el) => {
+          const r = el.getBoundingClientRect()
+          const style = getComputedStyle(el)
+          return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+        }
+        const inputs = [...document.querySelectorAll('input')].filter(visible)
+        const pass = inputs.find((el) => el.type === 'password')
+        const loginEl =
+          inputs.find((el) => el.type === 'email') ||
+          inputs.find((el) => /email|login|user|логин|почт/i.test((el.name || '') + (el.id || '') + (el.placeholder || ''))) ||
+          inputs.find((el) => el.type === 'text')
+        let fields = 0
+        if (loginEl) { setValue(loginEl, loginValue); fields++ }
+        if (pass) { setValue(pass, passwordValue); fields++ }
+        return { fields, hasPassword: !!pass, hasLogin: !!loginEl }
+      })()`,
+      true,
+    )) as { fields: number; hasPassword: boolean; hasLogin: boolean }
+    if (!result.fields) return { ok: false, note: 'Поля входа не найдены на странице', fields: 0 }
+    return {
+      ok: true,
+      note: `Заполнено полей: ${result.fields}${result.hasPassword ? ' (логин и пароль)' : ' (пароль не найден)'}`,
+      fields: result.fields,
+    }
+  }
+
+  /**
    * Список полей загрузки файлов на текущей странице (input[type=file]).
    * Нужен агенту, чтобы понять, куда прикладывать обложку и WAV.
    */

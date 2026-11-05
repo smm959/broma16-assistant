@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><title>login test</title></head><body>
+<form onsubmit="return false">
+  <input type="email" name="email" placeholder="Email">
+  <input type="password" name="password" placeholder="Password">
+  <button type="submit">Войти</button>
+</form>
+<div id="out"></div>
+<script>
+  const out = document.getElementById('out')
+  const sync = () => {
+    const e = document.querySelector('input[name=email]').value
+    const p = document.querySelector('input[name=password]').value
+    out.textContent = 'values:' + e + '|' + p
+  }
+  document.querySelectorAll('input').forEach((el) => el.addEventListener('input', sync))
+</script></body></html>

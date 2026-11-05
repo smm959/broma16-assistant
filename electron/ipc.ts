@@ -5,6 +5,8 @@ import type { Services } from './services.js'
 import type { ProviderId } from '../shared/types.js'
 import { PROVIDERS } from './llm/presets.js'
 import { EMAIL_PRESETS } from './email/index.js'
+import { PORTAL_URL } from './browser/automation.js'
+import { secrets } from './security/secrets.js'
 import { createHash } from 'node:crypto'
 
 export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWindow | null) {
@@ -35,6 +37,50 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
   })
 
   handle('settings:save', (patch: Record<string, unknown>) => normalizeSettings(svc.saveSettings(patch)))
+
+  const accountState = () => {
+    const st = svc.settings()
+    return {
+      login: st.accountLogin ?? '',
+      remember: st.rememberAccount === 'true',
+      openOnStart: st.openCabinetOnStart === 'true',
+      hasPassword: secrets().has('broma:password'),
+      passwordHint: secrets().hint('broma:password'),
+      session: browser.state(),
+    }
+  }
+
+  handle('account:state', accountState)
+  handle('account:save', (input: any) => {
+    svc.saveSettings({
+      accountLogin: String(input.login ?? '').trim(),
+      rememberAccount: Boolean(input.remember),
+      openCabinetOnStart: Boolean(input.openOnStart),
+    })
+    if (typeof input.password === 'string' && input.password.length) {
+      secrets().set('broma:password', input.password)
+    }
+    if (!input.remember) secrets().delete('broma:password')
+    return accountState()
+  })
+  handle('account:forget', () => {
+    secrets().delete('broma:password')
+    svc.saveSettings({ rememberAccount: false })
+    return accountState()
+  })
+  handle('account:auto-login', async () => {
+    await browser.open(PORTAL_URL, true)
+    const page = await browser.read()
+    if (page.loggedIn) return { ok: true, loggedIn: true, filled: 0, note: 'Сессия уже активна' }
+    const st = svc.settings()
+    const password = secrets().get('broma:password')
+    if (!st.accountLogin || !password) {
+      return { ok: false, loggedIn: false, filled: 0, note: 'Вход не сохранён — введите логин и пароль в настройках' }
+    }
+    const filled = await browser.fillLogin(st.accountLogin, password)
+    browser.showWindow()
+    return { ok: filled.ok, loggedIn: false, filled: filled.fields, note: filled.note }
+  })
 
   handle('provider:save', async (input: any) => llm.saveConnection(input))
 
@@ -341,6 +387,9 @@ function mapTicket(r: any) {
 function normalizeSettings(raw: Record<string, string>) {
   return {
     ...raw,
+    accountLogin: raw.accountLogin ?? '',
+    rememberAccount: raw.rememberAccount === 'true',
+    openCabinetOnStart: raw.openCabinetOnStart === 'true',
     autoFollowUpDays: Number(raw.autoFollowUpDays ?? 14),
     autoSendFollowUp: raw.autoSendFollowUp === 'true',
     confirmEverything: raw.confirmEverything !== 'false',

@@ -54,6 +54,10 @@ export interface AppSettings {
   signature: string
   autoFollowUpDays: number
   autoSendFollowUp: boolean
+  /** Логин в кабинет Broma 16 (email), пароль хранится отдельно в keychain */
+  accountLogin: string
+  rememberAccount: boolean
+  openCabinetOnStart: boolean
   confirmEverything: boolean
   theme: 'system' | 'light' | 'dark'
   reduceMotion: boolean

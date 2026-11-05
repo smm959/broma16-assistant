@@ -17,6 +17,7 @@ export interface ToolContext {
   files: FileService
   settings: () => Record<string, any>
   attachments: Map<string, AttachmentRef>
+  accountCredentials: () => { login: string; password: string | null }
 }
 
 export interface ToolResult {
@@ -400,6 +401,32 @@ export const TOOLS: ToolDef[] = [
       const url = typeof args.url === 'string' && args.url.startsWith('http') ? args.url : undefined
       const r = await ctx.browser.open(url)
       return { content: `Открыт браузер: ${r.url} («${r.title}»). Если нужен вход — попроси пользователя войти в открытом окне.` }
+    },
+  },
+  {
+    name: 'account_autologin',
+    description:
+      'Открыть кабинет Broma 16 и подставить сохранённые логин/пароль (если пользователь включил «Запоминать вход»). Кнопку «Войти» и 2FA пользователь подтверждает сам.',
+    risk: 'confirm',
+    parameters: obj({}),
+    title: () => 'Войти в кабинет Broma 16 сохранёнными данными',
+    run: async (_a, ctx) => {
+      const creds = ctx.accountCredentials()
+      if (!creds.login || !creds.password) {
+        return {
+          content:
+            'Сохранённого входа нет. Попроси пользователя включить «Запоминать вход» в «Настройки → Аккаунт Broma 16» и сохранить логин/пароль.',
+        }
+      }
+      await ctx.browser.open('https://africa.broma16.com/proceed', true)
+      const page = await ctx.browser.read()
+      if (page.loggedIn) return { content: 'Сессия кабинета уже активна — вход не требуется.' }
+      const r = await ctx.browser.fillLogin(creds.login, creds.password)
+      return {
+        content: r.ok
+          ? `${r.note}. Если появился запрос 2FA/CAPTCHA — пользователь проходит его сам, дальше продолжи чтение страницы.`
+          : `Не удалось заполнить форму входа: ${r.note}`,
+      }
     },
   },
   {

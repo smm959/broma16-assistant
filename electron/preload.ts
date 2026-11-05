@@ -19,6 +19,12 @@ const api = {
     models: (provider: string, baseUrl?: string) => invoke('provider:models', provider, baseUrl),
     disconnect: () => invoke('provider:disconnect'),
   },
+  account: {
+    state: () => invoke('account:state'),
+    save: (input: any) => invoke('account:save', input),
+    forget: () => invoke('account:forget'),
+    autoLogin: () => invoke('account:auto-login'),
+  },
   vision: {
     get: () => invoke('vision:get'),
     save: (input: any) => invoke('vision:save', input),

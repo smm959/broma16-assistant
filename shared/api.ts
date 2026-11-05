@@ -36,6 +36,19 @@ export interface Api {
     models(provider: ProviderId, baseUrl?: string): Promise<string[]>
     disconnect(): Promise<void>
   }
+  account: {
+    state(): Promise<{
+      login: string
+      remember: boolean
+      openOnStart: boolean
+      hasPassword: boolean
+      passwordHint?: string
+      session: BrowserAccountState
+    }>
+    save(input: { login: string; password?: string; remember: boolean; openOnStart: boolean }): Promise<any>
+    forget(): Promise<any>
+    autoLogin(): Promise<{ ok: boolean; loggedIn: boolean; filled: number; note: string }>
+  }
   vision: {
     get(): Promise<VisionState | null>
     save(input: { provider: ProviderId; model: string; apiKey?: string; baseUrl?: string }): Promise<VisionState>

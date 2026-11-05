@@ -17,6 +17,7 @@ import type {
   SourceRef,
 } from '../../shared/types.js'
 import { TOOLS, toolMap, type ToolContext, type ToolDef } from './tools.js'
+import { secrets } from '../security/secrets.js'
 import { buildSystemPrompt, readSettings } from './prompt.js'
 
 export interface AgentDeps {
@@ -465,6 +466,10 @@ export class AgentOrchestrator {
       files: this.deps.files,
       settings: () => readSettings(this.deps.db),
       attachments: atts,
+      accountCredentials: () => ({
+        login: readSettings(this.deps.db).accountLogin ?? '',
+        password: secrets().get('broma:password'),
+      }),
     }
   }
 

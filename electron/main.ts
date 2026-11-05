@@ -4,6 +4,8 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { buildServices, type Services } from './services.js'
 import { registerIpc } from './ipc.js'
 import { initScheduler } from './scheduler.js'
+import { PORTAL_URL } from './browser/automation.js'
+import { secrets } from './security/secrets.js'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -176,6 +178,7 @@ if (!gotLock) {
       mainWindow?.show()
       mainWindow?.focus()
     })
+    void autoOpenCabinet(services)
 
     // Разрешаем только нужные разрешения (микрофон/камера не требуются)
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
@@ -185,6 +188,38 @@ if (!gotLock) {
       else mainWindow?.show()
     })
   }
+}
+
+/** Если включено «Открывать кабинет при запуске» — заходим в аккаунт заранее. */
+async function autoOpenCabinet(svc: Services) {
+  if (svc.settings().openCabinetOnStart !== 'true') return
+  setTimeout(async () => {
+    try {
+      await svc.browser.open(PORTAL_URL, false)
+      const page = await svc.browser.read()
+      if (page.loggedIn) {
+        svc.emit('event:notify', { title: 'Кабинет Broma 16', body: 'Сессия активна — можно сразу работать' })
+        return
+      }
+      const st = svc.settings()
+      const password = secrets().get('broma:password')
+      if (st.accountLogin && password) {
+        const filled = await svc.browser.fillLogin(st.accountLogin, password)
+        svc.browser.showWindow()
+        svc.emit('event:notify', {
+          title: 'Вход в кабинет Broma 16',
+          body: filled.ok ? 'Логин и пароль подставлены — подтвердите вход' : filled.note,
+        })
+      } else {
+        svc.emit('event:notify', {
+          title: 'Кабинет Broma 16',
+          body: 'Сохраните логин и пароль в настройках, чтобы входить автоматически',
+        })
+      }
+    } catch {
+      /* нет сети — попробуем в следующий запуск */
+    }
+  }, 6000)
 }
 
 app.on('before-quit', () => {

@@ -93,6 +93,22 @@ app.whenReady().then(async () => {
     )
     check('Инструмент account_upload_files работает', /прикреплены/i.test(upRes.content), upRes.content.slice(0, 90))
 
+    /* ---------------- сохранённый вход в кабинет ---------------- */
+    await svc.browser.open('file://' + join(process.cwd(), 'test-fixtures', 'login.html'))
+    const filled = await svc.browser.fillLogin('music959@example.com', 'super-secret-pass')
+    await new Promise((r) => setTimeout(r, 200))
+    const loginPage = await svc.browser.read()
+    check(
+      'Автовход заполняет логин и пароль',
+      filled.ok && filled.fields === 2 && loginPage.text.includes('music959@example.com') && loginPage.text.includes('super-secret-pass'),
+      filled.note,
+    )
+    svc.saveSettings({ accountLogin: 'music959@example.com', rememberAccount: true })
+    const { secrets: secretsMod } = await import('../electron/security/secrets.js')
+    secretsMod().set('broma:password', 'super-secret-pass')
+    check('Пароль кабинета хранится в секретах', secretsMod().get('broma:password') === 'super-secret-pass' && secretsMod().hint('broma:password')?.includes('pass'))
+    check('Логин сохранён в настройках', svc.settings().accountLogin === 'music959@example.com' && svc.settings().rememberAccount === 'true')
+
     /* ---------------- vision fallback ---------------- */
     const visionServer = createServer((req, res) => {
       req.resume()
