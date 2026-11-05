@@ -1,5 +1,8 @@
 # Broma 16 Assistant
 
+![macOS build](https://img.shields.io/badge/macOS-DMG%20v1.0.0-black?logo=apple)
+![Windows build](https://img.shields.io/badge/Windows-build%20help%20wanted-yellow)
+
 Персональный desktop-ассистент для работы с музыкальным дистрибьютором **Broma 16**: релизы, отчёты, выплаты, питчинг, Content ID, YouTube, тексты песен и поддержка — в одном окне, обычным языком.
 
 Приложение не имитирует работу: письма действительно отправляются, FAQ действительно загружается с официального Help Center, личный кабинет действительно открывается в управляемом браузере.
@@ -44,9 +47,44 @@
 
 ## Установка
 
-Готовый установщик: `release/Broma 16 Assistant-1.0.0-arm64.dmg` (macOS Apple Silicon).
-Откройте DMG, перетащите приложение в «Программы». Сборка не подписана — при первом запуске
-разрешите приложение в «Системные настройки → Конфиденциальность и безопасность».
+**macOS (Apple Silicon):** готовый установщик — в разделе [Releases](https://github.com/smm959/broma16-assistant/releases/latest)
+(`Broma 16 Assistant-1.0.0-arm64.dmg`, 128 МБ).
+
+1. Откройте DMG и перетащите приложение в «Программы».
+2. Сборка не подписана — при первом запуске разрешите её в «Системные настройки → Конфиденциальность и безопасность» (или правый клик → «Открыть»).
+
+SHA-256: `2c8db964944d04f546b9c84bcfcde6fc81d3a2754ec1ad0af7fa17200bdf2d8c`
+
+**Windows:** установщика пока нет — нужна помощь сообщества, см. раздел ниже.
+
+## Windows: нужна помощь со сборкой
+
+Приложение написано на Electron и работает на Windows 10/11 (x64), но готовый установщик
+пока не собран: у автора нет Windows-машины. Если можете помочь — это займёт около 10 минут.
+
+```powershell
+git clone https://github.com/smm959/broma16-assistant.git
+cd broma16-assistant
+npm install
+npm run dist:win        # NSIS-установщик + portable .exe появятся в release/
+```
+
+Требования: Node.js 22+, Windows 10/11 x64, свободные ~2 ГБ. Подпись не нужна.
+
+Что стоит проверить перед отправкой:
+- установщик ставится и приложение запускается из меню «Пуск»;
+- ключ API сохраняется (на Windows используется DPAPI) и переживает перезапуск;
+- трей и сворачивание окна работают, агент продолжает задачу в фоне;
+- IMAP/SMTP подключается;
+- `npm run typecheck` и `npm run smoke` проходят (smoke-тест использует локальные фейковые серверы, реальные ключи не нужны).
+
+Куда прислать результат: приложите `.exe`/`.zip` и краткий отчёт к Issue
+**«Windows build»** (создайте новое issue с этим заголовком) либо откройте PR с артефактами
+в `release/`. Мы добавим сборку в Releases и укажем вас в благодарностях.
+
+> English: the app supports Windows, but there is no Windows installer yet. If you can run
+> `npm run dist:win` on Windows and share the artifacts in a "Windows build" issue, it would be
+> much appreciated.
 
 ## Установка для разработки
 
