@@ -59,7 +59,7 @@ export default function ReleasesScreen() {
       conversationId: c.id,
       text: [
         `Загружаем релиз «${r.title}» в личный кабинет Broma 16.`,
-        `Данные: артист — ${r.artist || 'не указан'}, дата релиза — ${r.releaseDate || 'не указана'}, UPC/EAN — ${r.upc || 'нет'}, ISRC — ${r.isrc || 'нет'}.`,
+        `Данные: артист — ${r.artist || 'не указан'}, дата релиза — ${r.releaseDate || 'не указана'}, UPC/EAN — ${r.upc || 'нет'}, ISRC — ${r.isrc || 'нет'}, лейбл — ${app.settings?.labelName || app.settings?.accountName || 'не указан'}.`,
         'Открой кабинет, помоги мне войти, покажи форму создания релиза и поля загрузки файлов (account_file_inputs).',
         'Я пришлю обложку и WAV в чат — прикрепи их через account_upload_files. Заполняй поля по шагам и ничего не отправляй без моего подтверждения.',
       ].join(' '),
