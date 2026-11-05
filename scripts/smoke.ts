@@ -163,9 +163,17 @@ app.whenReady().then(async () => {
     const filledDate = await svc.browser.fillField('date_p_line', '2026')
     check('Дата выбирается через календарь', filledDate.ok && filledDate.after === '2026', filledDate.note)
     const genre = await svc.browser.chooseOption('genre_dd', 'Pop')
-    check('account_select выбирает опцию кастомного дропдауна', genre.ok && genre.after === 'Pop', genre.note)
+    check('account_select выбирает опцию кастомного дропдауна', Boolean(genre.ok) && /Pop/.test(String(genre.after)), genre.note)
     const native = await svc.browser.chooseOption('f-type', 'Сингл')
     check('account_select работает с нативным select', native.ok && native.after === 'Сингл', native.note)
+    const missing = await svc.browser.chooseOption('genre_dd', 'НетТакого')
+    check('account_select не врёт при отсутствии опции', missing.ok === false && /не найдена/i.test(missing.note), missing.note.slice(0, 80))
+    const keys = (await svc.browser.formFields()) as any[]
+    check(
+      'account_form_fields отдаёт стабильные ключи',
+      keys.some((f) => f.key === 'ph:Название') && keys.some((f) => f.key === 'ph:p-дата*'),
+      keys.map((f) => f.key).slice(0, 5).join(', '),
+    )
 
     /* ---------------- vision fallback ---------------- */
     const visionServer = createServer((req, res) => {

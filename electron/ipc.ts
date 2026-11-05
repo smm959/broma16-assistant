@@ -69,11 +69,11 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
     svc.saveSettings({ rememberAccount: false })
     return accountState()
   })
-  handle('account:auto-login', async () => {
+  handle('account:auto-login', async (url?: string) => {
     const st = svc.settings()
     const res = await autoLogin(
       { browser, email, credentials: { login: st.accountLogin ?? '', password: secrets().get('broma:password') } },
-      { url: LOGIN_URL, show: true },
+      { url: typeof url === 'string' && url.startsWith('http') ? url : LOGIN_URL, show: true },
     )
     if (res.needsUser) browser.showWindow()
     return res
@@ -344,6 +344,7 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
 
   handle('browser:open', (url?: string) => browser.open(url))
   handle('browser:read', () => browser.read())
+  handle('browser:click', (target: string) => browser.click(target))
   handle('browser:form-fields', () => browser.formFields())
   handle('browser:fill-field', (target: any, value: string) => browser.fillField(target, value))
   handle('browser:choose-option', (target: any, option: string) => browser.chooseOption(target, option))

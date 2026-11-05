@@ -23,7 +23,7 @@ const api = {
     state: () => invoke('account:state'),
     save: (input: any) => invoke('account:save', input),
     forget: () => invoke('account:forget'),
-    autoLogin: () => invoke('account:auto-login'),
+    autoLogin: (url?: string) => invoke('account:auto-login', url),
   },
   vision: {
     get: () => invoke('vision:get'),
@@ -102,6 +102,7 @@ const api = {
   browser: {
     open: (url?: string) => invoke('browser:open', url),
     read: () => invoke('browser:read'),
+    click: (target: string) => invoke('browser:click', target),
     formFields: () => invoke('browser:form-fields'),
     fillField: (target: any, value: string) => invoke('browser:fill-field', target, value),
     chooseOption: (target: any, option: string) => invoke('browser:choose-option', target, option),

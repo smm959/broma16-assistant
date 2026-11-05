@@ -37,33 +37,47 @@ export async function autoLogin(
   }
 
   let page = await browser.read({ maxChars: 20_000 })
-  if (page.loggedIn) {
+
+  // Внутренние страницы (кабинет, визард релиза) не должны уходить в ветку логина.
+  if (page.auth === 'in') {
     steps.push('Сессия уже активна')
     return { ok: true, loggedIn: true, steps, note: 'Сессия кабинета уже активна — вход не требуется.' }
   }
 
+  if (page.auth === 'unknown') {
+    steps.push('Статус входа не определён')
+    return {
+      ok: false,
+      loggedIn: false,
+      steps,
+      note: `Страница «${page.title || page.url}» ещё не отрисовалась или не похожа ни на вход, ни на кабинет. Прочитай её ещё раз (account_read) — если это внутренняя страница, вход уже выполнен.`,
+      needsUser: true,
+    }
+  }
+
+  // auth === 'out': ищем форму входа.
   if (!page.hasPasswordField) {
-    // Иногда портал сначала показывает лендинг с кнопкой «Войти» — идём по ней.
     for (const label of ['войти', 'вход', 'sign in', 'log in', 'login']) {
       const clicked = await browser.click(label)
       if (!clicked.ok) continue
       await sleep(1800)
       page = await browser.read({ maxChars: 20_000 })
-      if (page.hasPasswordField) break
+      if (page.hasPasswordField || page.auth === 'in') break
     }
   }
 
+  if (page.auth === 'in') {
+    steps.push('Сессия активна')
+    return { ok: true, loggedIn: true, steps, note: 'Кабинет уже открыт, вход не требуется.' }
+  }
+
   if (!page.hasPasswordField) {
-    if (page.loggedIn) {
-      steps.push('Сессия активна')
-      return { ok: true, loggedIn: true, steps, note: 'Кабинет уже открыт, вход не требуется.' }
-    }
     steps.push('Форма входа не найдена')
     return {
       ok: false,
       loggedIn: false,
       steps,
-      note: `Страница открыта (${page.title || page.url}), поле пароля не найдено и признаков кабинета тоже. Прочитай страницу (account_read): возможно, вход уже выполнен или нужен другой экран.`,
+      note: `Открыта страница входа (${page.title || page.url}), но поле пароля не найдено. Открой ${'`'}https://rod.broma16.com/login${'`'} заново или попроси пользователя войти вручную.`,
       needsUser: true,
     }
   }

@@ -32,7 +32,12 @@
   const gp = document.getElementById('genre-panel')
   document.getElementById('genre_dd').onclick = () => gp.classList.toggle('open')
   gp.querySelectorAll('li').forEach((el) => {
-    el.onclick = () => { document.getElementById('f-genre').value = el.innerText.trim(); gp.classList.remove('open') }
+    el.onclick = () => {
+      const v = el.innerText.trim()
+      document.getElementById('f-genre').value = v
+      document.querySelector('#genre_dd .p-dropdown-label').innerText = v
+      gp.classList.remove('open')
+    }
   })
 </script>
 </body></html>

@@ -47,7 +47,7 @@ export interface Api {
     }>
     save(input: { login: string; password?: string; remember: boolean; openOnStart: boolean }): Promise<any>
     forget(): Promise<any>
-    autoLogin(): Promise<{ ok: boolean; loggedIn: boolean; steps: string[]; note: string; needsUser?: boolean }>
+    autoLogin(url?: string): Promise<{ ok: boolean; loggedIn: boolean; steps: string[]; note: string; needsUser?: boolean }>
   }
   vision: {
     get(): Promise<VisionState | null>
@@ -119,7 +119,8 @@ export interface Api {
   contacts(): Promise<Contact[]>
   browser: {
     open(url?: string): Promise<{ url: string; title: string }>
-    read(): Promise<{ url: string; title: string; text: string; loggedIn: boolean; links: { text: string; href: string }[] }>
+    read(): Promise<{ url: string; title: string; text: string; loggedIn: boolean; auth: 'in' | 'out' | 'unknown'; links: { text: string; href: string }[] }>
+    click(target: string): Promise<{ ok: boolean; note: string }>
     formFields(): Promise<any[]>
     fillField(target: string | number, value: string): Promise<any>
     chooseOption(target: string | number, option: string): Promise<any>

@@ -28,6 +28,15 @@ const FORM_FIELDS_JS = String.raw`(() => {
     const parentText = (el.parentElement && el.parentElement.innerText) || ''
     const required = !!el.required || /\*/.test(labelText) || (parentText.match(/\*/) ? el.closest('label') !== null : false)
     const tag = el.tagName.toLowerCase()
+    const tokenRoot = el.closest('.p-autocomplete-multiple-container')
+    const tokens = tokenRoot ? [...tokenRoot.querySelectorAll('.p-autocomplete-token-label')].map((x) => x.innerText.trim()).filter(Boolean) : []
+    const invalid = el.getAttribute('aria-invalid') === 'true' || el.classList.contains('p-invalid') || !!el.closest('.p-invalid')
+    const placeholder = el.getAttribute('placeholder') || ''
+    let key = ''
+    if (placeholder) key = 'ph:' + placeholder
+    else if (wrap && wrap.id) key = 'wrap:' + wrap.id
+    else if (el.id && !/^ti-/.test(el.id)) key = 'id:' + el.id
+    else key = 'idx:' + index
     let selector = ''
     if (el.id) selector = '#' + el.id
     else if (wrap && wrap.id) selector = '#' + wrap.id + ' ' + tag
@@ -38,13 +47,16 @@ const FORM_FIELDS_JS = String.raw`(() => {
       type: el.type || '',
       name: el.getAttribute('name') || '',
       id: el.id || '',
-      placeholder: el.getAttribute('placeholder') || '',
+      placeholder,
       ariaLabel: el.getAttribute('aria-label') || '',
       formcontrolname: el.getAttribute('formcontrolname') || el.getAttribute('formControlName') || '',
       required,
       disabled: !!el.disabled,
       readOnly: !!el.readOnly,
       value: (el.value || '').toString().slice(0, 80),
+      tokens,
+      invalid,
+      key,
       visible: visible(el),
       wrapper: wrap ? wrap.id : '',
       label: labelText.replace(/\s+/g, ' ').trim().slice(0, 80),
@@ -72,6 +84,24 @@ const RESOLVE_JS = (target: string | number) => String.raw`(() => {
   }
   const s = String(t).trim()
   if (!s) return { reason: 'Пустой target' }
+  if (/^ph:/i.test(s)) {
+    const k = norm(s.slice(3))
+    const el = all.find((e) => norm(e.getAttribute('placeholder')) === k) || all.find((e) => norm(e.getAttribute('placeholder')).includes(k))
+    return el ? done(el, 'key-placeholder') : { reason: 'Поле с placeholder «' + s.slice(3) + '» не найдено' }
+  }
+  if (/^wrap:/i.test(s)) {
+    const k = norm(s.slice(5))
+    const el = all.find((e) => { const w = e.parentElement && e.parentElement.closest('[id]'); return w && norm(w.id) === k })
+    return el ? done(el, 'key-wrapper') : { reason: 'Поле с wrapper «' + s.slice(5) + '» не найдено' }
+  }
+  if (/^id:/i.test(s)) {
+    const el = document.getElementById(s.slice(3))
+    return el && idxOf(el) >= 0 ? done(el, 'key-id') : { reason: 'Поле с id «' + s.slice(3) + '» не найдено' }
+  }
+  if (/^idx:/i.test(s)) {
+    const i = Number(s.slice(4))
+    return all[i] ? { index: i, via: 'key-index' } : { reason: 'Индекс ' + i + ' вне диапазона' }
+  }
   // 1. CSS-селектор
   try {
     const els = [...document.querySelectorAll(s)]
@@ -142,6 +172,75 @@ async function execJs(wc: Electron.WebContents, script: string, gesture?: boolea
   }
 }
 
+const STAB_JS = `(() => {
+  if (window.__bromaStab) return true
+  window.__bromaStab = true
+  window.__bromaMut = 0
+  window.__bromaMutAt = Date.now()
+  window.__bromaNet = 0
+  try {
+    new MutationObserver(() => { window.__bromaMut++; window.__bromaMutAt = Date.now() })
+      .observe(document.documentElement || document, { subtree: true, childList: true, characterData: true, attributes: true })
+  } catch (e) {}
+  try {
+    const of = window.fetch
+    if (of) {
+      window.fetch = function (...args) {
+        window.__bromaNet++
+        return of.apply(this, args).finally(() => { window.__bromaNet--; window.__bromaMutAt = Date.now() })
+      }
+    }
+  } catch (e) {}
+  try {
+    const send = XMLHttpRequest.prototype.send
+    XMLHttpRequest.prototype.send = function (...args) {
+      window.__bromaNet++
+      this.addEventListener('loadend', () => { window.__bromaNet--; window.__bromaMutAt = Date.now() })
+      return send.apply(this, args)
+    }
+  } catch (e) {}
+  return true
+})()`
+
+const READ_JS = `(() => {
+  const text = document.body ? document.body.innerText : ''
+  const links = [...document.querySelectorAll('a[href]')].slice(0, 80).map((a) => ({ text: (a.innerText || '').trim().slice(0, 80), href: a.href }))
+  const visible = (el) => {
+    const r = el.getBoundingClientRect()
+    const st = getComputedStyle(el)
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'
+  }
+  const visibleInputs = [...document.querySelectorAll('input')].filter(visible)
+  const hasPasswordField = visibleInputs.some((el) => el.type === 'password')
+  const otpRe = /(code|otp|2fa|verif|token|код|подтвержд)/i
+  const hasOtpField = visibleInputs.some(
+    (el) =>
+      el.type === 'tel' ||
+      el.inputMode === 'numeric' ||
+      otpRe.test((el.name || '') + (el.id || '') + (el.placeholder || '') + (el.autocomplete || '') + ((el.labels && el.labels[0] && el.labels[0].innerText) || '')),
+  )
+  const logout = [...document.querySelectorAll('a,button')].some((el) => /^(выйти|выход|log ?out|sign ?out)$/i.test((el.innerText || '').trim()))
+  const wizard = /(Дистрибуция|Обзор)/.test(text) && /(Файлы|Фонограммы|Релиз)/.test(text)
+  return { url: location.href, title: document.title, text, links, hasPasswordField, hasOtpField, logout, wizard }
+})()`
+
+function detectAuth(data: {
+  url?: string
+  text?: string
+  hasPasswordField?: boolean
+  logout?: boolean
+  wizard?: boolean
+}): 'in' | 'out' | 'unknown' {
+  const url = String(data.url ?? '')
+  const text = String(data.text ?? '')
+  if (data.logout || data.wizard || /\/accounts\//i.test(url)) return 'in'
+  if (data.hasPasswordField || /(login|sign[-_]?in|signin|\/auth)/i.test(url)) return 'out'
+  if (text.trim().length < 20) return 'unknown'
+  // Нет ни формы входа, ни признаков кабинета — честно «не удалось определить»,
+  // отсутствие поля пароля само по себе не означает разлогин.
+  return 'unknown'
+}
+
 export class BrowserAutomation {
   private win: BrowserWindow | null = null
   private lastUrl = ''
@@ -183,6 +282,22 @@ export class BrowserAutomation {
     } catch (e) {
       this.resetWindow()
       throw e
+    }
+  }
+
+  /** Ставим счётчики мутаций DOM и сетевых запросов (fetch/XHR), чтобы понять, когда страница успокоилась. */
+  private async waitForStable(win: BrowserWindow, timeoutMs = 10_000, quietMs = 350): Promise<void> {
+    await execJs(win.webContents, STAB_JS).catch(() => undefined)
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const state = (await execJs(
+        win.webContents,
+        `({ mutAt: window.__bromaMutAt || 0, net: window.__bromaNet || 0, len: document.body ? document.body.innerText.length : 0 })`,
+      ).catch(() => null)) as { mutAt: number; net: number; len: number } | null
+      if (!state) return
+      const quiet = Date.now() - Number(state.mutAt || 0)
+      if (Number(state.net) === 0 && quiet > quietMs && Number(state.len) > 0) return
+      await new Promise((r) => setTimeout(r, 150))
     }
   }
 
@@ -280,55 +395,35 @@ export class BrowserAutomation {
     title: string
     text: string
     loggedIn: boolean
+    auth: 'in' | 'out' | 'unknown'
     hasPasswordField: boolean
     hasOtpField: boolean
     links: { text: string; href: string }[]
   }> {
     const win = this.ensureWindow(false)
     await this.waitReady(win)
-    await this.waitForContent(win, 10, 6000).catch(() => undefined)
-    const data = (await this.ev(win, 
-      `(() => {
-        const text = document.body ? document.body.innerText : ''
-        const links = [...document.querySelectorAll('a[href]')].slice(0, 80).map(a => ({ text: (a.innerText||'').trim().slice(0,80), href: a.href }))
-        const visible = (el) => {
-          const r = el.getBoundingClientRect()
-          const st = getComputedStyle(el)
-          return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'
-        }
-        const visibleInputs = [...document.querySelectorAll('input')].filter(visible)
-        const hasPasswordField = visibleInputs.some((el) => el.type === 'password')
-        const otpRe = /(code|otp|2fa|verif|token|код|подтвержд)/i
-        const hasOtpField = visibleInputs.some((el) =>
-          el.type === 'tel' || el.inputMode === 'numeric' ||
-          otpRe.test((el.name || '') + (el.id || '') + (el.placeholder || '') + (el.autocomplete || '') + ((el.labels && el.labels[0] && el.labels[0].innerText) || '')),
-        )
-        return { url: location.href, title: document.title, text, links, hasPasswordField, hasOtpField }
-      })()`,
-      true,
-    )) as any
+    await this.waitForStable(win).catch(() => undefined)
+
+    let data: any = null
+    let auth: 'in' | 'out' | 'unknown' = 'unknown'
+    for (let attempt = 0; attempt < 3; attempt++) {
+      data = (await this.ev(win, READ_JS)) as any
+      auth = detectAuth(data)
+      if (auth !== 'unknown') break
+      await new Promise((r) => setTimeout(r, 650))
+      await this.waitForStable(win, 4000).catch(() => undefined)
+    }
+    if (!data) data = { url: '', title: '', text: '', links: [], hasPasswordField: false, hasOtpField: false }
+
     this.lastUrl = data.url
     this.lastTitle = data.title
     this.lastText = data.text ?? ''
-    const text = String(this.lastText)
-    const url = String(data.url)
-    const loginUrl = /(login|sign[-_]?in|signin|\/auth|войти)/i.test(url)
-    const accountSignals = /(logout|log out|sign out|выйти|выход|my releases|мои релизы|dashboard|личный кабинет|account settings|профиль|statistics|статистик)/i.test(
-      text.slice(0, 20000),
-    )
-    const accountUrl = /(dashboard|\/account|\/releases|cabinet|\/profile)/i.test(url)
-    const marketing = /(proceed to sign up|create an account|создать аккаунт|регистрац)/i.test(text.slice(0, 800))
-    const loggedIn =
-      !data.hasPasswordField &&
-      !data.hasOtpField &&
-      !loginUrl &&
-      (accountSignals || accountUrl) &&
-      !(marketing && !/logout|выйти/i.test(text.slice(0, 20000)))
     return {
       url: data.url,
       title: data.title,
       text: String(this.lastText).slice(0, options.maxChars ?? 30_000),
-      loggedIn,
+      loggedIn: auth === 'in',
+      auth,
       hasPasswordField: Boolean(data.hasPasswordField),
       hasOtpField: Boolean(data.hasOtpField),
       links: data.links ?? [],
@@ -392,14 +487,37 @@ export class BrowserAutomation {
     return { ok: true, url: href, note: 'Перешли по ссылке' }
   }
 
-  async screenshot(): Promise<{ path: string }> {
+  async screenshot(): Promise<{ path: string; degraded: boolean; note?: string }> {
     const win = this.ensureWindow(false)
-    const image = await win.webContents.capturePage()
+    const grab = async () => {
+      let timer: NodeJS.Timeout | undefined
+      try {
+        return await Promise.race([
+          win.webContents.capturePage(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Скриншот не получен за 45 секунд')), 45_000)
+          }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }
+    let image: Electron.NativeImage
+    try {
+      image = await grab()
+    } catch {
+      try {
+        await this.waitForContent(win, 5, 5000).catch(() => undefined)
+        image = await grab()
+      } catch (e) {
+        return { path: '', degraded: true, note: `Скриншот недоступен: ${(e as Error).message}. Страницу можно проверить через account_read.` }
+      }
+    }
     const dir = join(this.userDataDir, 'screenshots')
     mkdirSync(dir, { recursive: true })
     const path = join(dir, `broma-${Date.now()}.png`)
     writeFileSync(path, image.toPNG())
-    return { path }
+    return { path, degraded: false }
   }
 
   /**
@@ -901,19 +1019,88 @@ export class BrowserAutomation {
       })()`,
       true,
     )) as any
-    await new Promise((r) => setTimeout(r, 400))
-    const after = (await this.ev(win, 
-      `(() => { const el = ${FIELD_BY_INDEX(index)}; const control = el.closest('.p-select, .p-dropdown, .p-autocomplete, .p-multiselect'); return { value: (el.value || '').toString(), text: control ? control.innerText.trim().slice(0, 120) : (el.closest('[id]') || el).innerText.trim().slice(0, 120) } })()`,
-      true,
-    )) as any
-    const ok = Boolean(picked.ok) && /[a-zа-я0-9]/i.test(String(after.value || after.text || ''))
+    if (!picked.ok) {
+      // Закрываем чужой оверлей, иначе следующее поле увидит не свои опции.
+      await this.pressKey('Escape').catch(() => undefined)
+      await new Promise((r) => setTimeout(r, 250))
+      return {
+        ok: false,
+        note: `Опция «${optionText}» не найдена. Доступно: ${(picked.options ?? []).slice(0, 8).join(' | ')}`,
+        before: String(before.value || before.text),
+        after: String(before.value || before.text),
+        options: picked.options,
+      }
+    }
+
+    await new Promise((r) => setTimeout(r, 500))
+    const verify = () => this.verifyOption(index, optionText)
+    let check = await verify()
+
+    // Fallback: клик → ввод текста → ArrowDown → Enter, затем снова проверяем.
+    if (picked.ok && !check.ok) {
+      await this.ev(win,
+        `(() => {
+          const el = ${FIELD_BY_INDEX(index)}
+          el.focus()
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+          setter ? setter.call(el, ${JSON.stringify(optionText)}) : (el.value = ${JSON.stringify(optionText)})
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, data: ${JSON.stringify(optionText)}, inputType: 'insertText' }))
+          return true
+        })()`,
+        true,
+      )
+      await new Promise((r) => setTimeout(r, 600))
+      await this.pressKey('ArrowDown').catch(() => undefined)
+      await this.pressKey('Enter').catch(() => undefined)
+      await new Promise((r) => setTimeout(r, 600))
+      check = await verify()
+    }
+
+    const evidence = check.evidence || before.value || before.text
     return {
-      ok,
-      note: picked.ok ? `Выбрано «${picked.matched ?? optionText}»; в контроле: «${String(after.value || after.text).slice(0, 60)}»` : `Опция не найдена. Доступно: ${(picked.options ?? []).slice(0, 8).join(' | ')}`,
+      ok: Boolean(picked.ok) && check.ok,
+      note: !picked.ok
+        ? `Опция не найдена. Доступно: ${(picked.options ?? []).slice(0, 8).join(' | ')}`
+        : check.ok
+          ? `Выбрано «${picked.matched ?? optionText}» — подтверждено в форме (${check.evidence.slice(0, 80)})`
+          : `Опция нажата, но значение не применилось: в контроле «${evidence.slice(0, 80)}». Попробуй account_form_fields и другой target.`,
       before: String(before.value || before.text),
-      after: String(after.value || after.text),
+      after: String(evidence),
       options: picked.options,
     }
+  }
+
+  /** Проверяем, что выбранное значение реально попало в форму (значение, токен/чип, подпись dropdown). */
+  private async verifyOption(
+    index: number,
+    option: string,
+  ): Promise<{ ok: boolean; evidence: string; tokens: string[]; value: string; label: string }> {
+    const win = this.ensureWindow(false)
+    return (await this.ev(win,
+      String.raw`(() => {
+        const el = ${FIELD_BY_INDEX(index)}
+        const want = ${JSON.stringify(option)}
+        const norm = (x) => String(x || '').trim().toLowerCase()
+        const control =
+          el.closest('.p-select, .p-dropdown, .p-autocomplete, .p-multiselect, .p-treeselect') ||
+          (el.parentElement && el.parentElement.closest('[id]')) ||
+          el.parentElement ||
+          el
+        const tokenRoot = el.closest('.p-autocomplete-multiple-container') || control
+        const tokens = [...tokenRoot.querySelectorAll('.p-autocomplete-token-label, .p-chip, .p-multiselect-token-label, .p-tag, .p-multiselect-item')]
+          .map((x) => (x.innerText || '').replace(/\s+/g, ' ').trim())
+          .filter(Boolean)
+        const labelEl = control.querySelector('.p-dropdown-label, .p-select-label, .p-multiselect-label, .p-autocomplete-dropdown')
+        const label = labelEl ? (labelEl.innerText || '').replace(/\s+/g, ' ').trim() : ''
+        const hiddenSelect = control.querySelector('select')
+        const hiddenText = hiddenSelect ? [...hiddenSelect.options].filter((o) => o.selected).map((o) => o.text.trim()).join(' ') : ''
+        const value = (el.value || '').toString()
+        const matches = (x) => { const n = norm(x); return n && (n === norm(want) || n.includes(norm(want))) }
+        const ok = tokens.some(matches) || matches(value) || matches(label) || (hiddenText && matches(hiddenText))
+        return { ok, evidence: tokens.join(' | ') || label || hiddenText || value, tokens, value, label, hiddenText }
+      })()`,
+      true,
+    )) as any
   }
 
   /** Выбор значения в p-calendar: год или день, с навигацией по десятилетиям/месяцам. */

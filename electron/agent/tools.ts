@@ -454,16 +454,16 @@ export const TOOLS: ToolDef[] = [
       const errors = await ctx.browser.validationErrors()
       const visible = fields.filter((f) => f.visible && f.type !== 'hidden')
       const fieldLines = visible
-        .map(
-          (f) =>
-            `- [${f.index}] ${f.tag}${f.datepicker ? ' (datepicker)' : ''} ${f.placeholder ? `ph="${f.placeholder}"` : ''} ${f.wrapper ? `wrapper=${f.wrapper}` : ''}${f.id ? ` id=${f.id}` : ''}${f.required ? ' *' : ''} = «${String(f.value).slice(0, 40)}»`,
-        )
+        .map((f) => {
+          const val = f.tokens?.length ? f.tokens.join(' | ') : String(f.value).slice(0, 40)
+          return `- [${f.index}] ${f.tag}${f.datepicker ? ' (datepicker)' : ''} ${f.key ? `key=${f.key}` : ''} ${f.placeholder ? `ph="${f.placeholder}"` : ''} ${f.wrapper ? `wrapper=${f.wrapper}` : ''}${f.required ? ' *' : ''}${f.invalid ? ' INVALID' : ''} = «${String(val).slice(0, 60)}»`
+        })
         .join('\n')
       return {
         content: [
           `URL: ${r.url}`,
           `Заголовок: ${r.title}`,
-          `Вход выполнен: ${r.loggedIn ? 'да' : 'нет'}`,
+          `Вход: ${r.auth === 'in' ? 'выполнен' : r.auth === 'out' ? 'не выполнен' : 'не удалось определить (страница ещё грузится или это не кабинет)'}`,
           r.text ? `\nТекст страницы:\n${r.text}` : '',
           fieldLines ? `\nПоля формы (${visible.length}):\n${fieldLines}` : '',
           errors.length ? `\nОшибки валидации:\n${errors.map((e) => `- ${e}`).join('\n')}` : '',
@@ -538,12 +538,14 @@ export const TOOLS: ToolDef[] = [
       const lines = visible.map((f) =>
         [
           `[${f.index}] ${f.tag}${f.type ? `/${f.type}` : ''}${f.datepicker ? ' datepicker' : ''}`,
+          f.key ? `key=${f.key}` : '',
           f.placeholder ? `ph="${f.placeholder}"` : '',
           f.wrapper ? `wrapper=${f.wrapper}` : '',
           f.id ? `id=${f.id}` : '',
           f.required ? 'required' : '',
+          f.invalid ? 'INVALID' : '',
           f.readOnly ? 'readonly' : '',
-          `value=«${String(f.value).slice(0, 30)}»`,
+          `value=«${String(f.tokens?.length ? f.tokens.join(' | ') : f.value).slice(0, 30)}»`,
           f.options?.length ? `options=${JSON.stringify(f.options.slice(0, 8))}` : '',
         ]
           .filter(Boolean)
@@ -660,11 +662,22 @@ export const TOOLS: ToolDef[] = [
     parameters: obj({}),
     run: async (_a, ctx) => {
       const shot = await ctx.browser.screenshot()
-      const fields = (await ctx.browser.formFields()) as any[]
+      let fields: any[] = []
+      try {
+        fields = (await ctx.browser.formFields()) as any[]
+      } catch {
+        fields = []
+      }
       const visible = fields.filter((f) => f.visible && f.type !== 'hidden')
       const dump = visible
-        .map((f) => `- [${f.index}] ${f.placeholder || f.wrapper || f.id || f.tag} = «${String(f.value).slice(0, 40)}»`)
+        .map((f) => `- [${f.index}] ${f.placeholder || f.wrapper || f.id || f.tag} = «${String(f.tokens?.length ? f.tokens.join(' | ') : f.value).slice(0, 40)}»`)
         .join('\n')
+      if (shot.degraded) {
+        return {
+          content: `Скриншот не удалось сделать (${shot.note ?? 'страница не отвечает'}). Сценарий продолжается.\nПоля:\n${dump || '(поля не прочитаны)'}`,
+          data: shot,
+        }
+      }
       if (ctx.vision.config()) {
         try {
           const description = await ctx.vision.describeImage(
