@@ -151,6 +151,8 @@ export class TelegramBot {
     const chatId = Number(msg.chat?.id)
     if (!chatId) return
     const text = String(msg.text ?? '').trim()
+    const kind = msg.document ? 'document' : msg.audio ? 'audio' : msg.photo ? 'photo' : 'text'
+    this.deps.log(`[telegram] ${chatId}: ${kind}`)
 
     if (/^\/(start|new)$/i.test(text)) {
       this.reset(chatId)
@@ -234,12 +236,32 @@ export class TelegramBot {
     }
 
     if (state.field === 'audio') {
-      const doc = msg.document
-      if (!doc) return void this.say(chatId, 'Нужен файл WAV (документом).')
-      const name = String(doc.file_name ?? 'audio.wav')
+      const doc = msg.document ?? msg.audio ?? null
+      // Ссылка на файл — обход лимита Telegram в 20 МБ на скачивание ботом.
+      if (!doc && /^https?:\/\//i.test(text)) {
+        try {
+          const path = await this.downloadUrl(text)
+          const info = await checkWav(path)
+          if (!info.ok) return void this.say(chatId, info.reason)
+          data.audioPath = path
+          data.audioTitle = basename(path)
+          return next('cover')
+        } catch (e) {
+          return void this.say(chatId, `Не смог скачать по ссылке: ${String(e).slice(0, 120)}`)
+        }
+      }
+      if (!doc) return void this.say(chatId, 'Пришлите WAV файлом/аудио или ссылкой на файл.')
+      const name = String(doc.file_name ?? (doc.mime_type === 'audio/wav' ? 'audio.wav' : 'audio'))
       if (!/\.wav$/i.test(name)) return void this.say(chatId, 'Нужен именно WAV-файл (16 или 24 бит, 44100 Гц).')
+      if (Number(doc.file_size ?? 0) > 20 * 1024 * 1024) {
+        return void this.say(
+          chatId,
+          'Файл больше 20 МБ — Telegram не отдаёт такие файлы ботам.\nПришлите ссылку на WAV (Google Drive/Dropbox/Яндекс.Диск с прямой ссылкой) — скачаю сам.',
+        )
+      }
       const path = await this.download(doc.file_id, name)
       const info = await checkWav(path)
+      this.deps.log(`[telegram] wav ${name}: ${info.ok ? 'ok ' : 'fail '}${info.reason}`)
       if (!info.ok) return void this.say(chatId, info.reason)
       data.audioPath = path
       data.audioTitle = name
@@ -281,6 +303,29 @@ export class TelegramBot {
       await this.say(chatId, res.text)
       return
     }
+  }
+
+  private async downloadUrl(rawUrl: string): Promise<string> {
+    const dir = join(this.deps.dir, 'telegram')
+    await mkdir(dir, { recursive: true })
+    let url = rawUrl
+    // Приводим популярные «страницы» к прямым ссылкам.
+    const drive = /drive\.google\.com\/file\/d\/([^/?#]+)/.exec(url)
+    if (drive) url = `https://drive.google.com/uc?export=download&id=${drive[1]}`
+    if (/dropbox\.com/.test(url)) url = url.replace(/[?&]dl=0/, '?dl=1')
+    const yandex = /^https?:\/\/disk\.yandex\.[a-z]+\/d\/([^/?#]+)/.exec(url)
+    if (yandex) {
+      const meta = await fetch(`https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=${encodeURIComponent(url)}`)
+      const j: any = await meta.json().catch(() => ({}))
+      if (j?.href) url = j.href
+    }
+    const res = await fetch(url, { redirect: 'follow' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length > 120 * 1024 * 1024) throw new Error('файл больше 120 МБ')
+    const path = join(dir, `${Date.now()}-remote.wav`)
+    await writeFile(path, buf)
+    return path
   }
 
   private async download(fileId: string, filename: string): Promise<string> {
