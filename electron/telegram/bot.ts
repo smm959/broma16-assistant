@@ -42,7 +42,7 @@ const QUESTIONS: Record<Field, string> = {
   explicit: '6/9. В треке есть ненормативная лексика? Ответьте «да» или «нет».',
   author:
     '7/9. Автор слов и музыки?\nОтправьте имя и долю через запятую (например: ELLIWAY, 100).\nЕсли автор — исполнитель и доля 100%, отправьте «-».',
-  audio: '8/9. Пришлите WAV-файл.\nТребования: WAV, 16 или 24 бит, 44100 Гц.',
+  audio: '8/9. Пришлите WAV-файл.\nТребования: WAV, 44100 Гц (16/24 бита; 32-bit float тоже принимается).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
   cover: '9/9. Пришлите обложку PNG 3000×3000 px (1:1, без логотипов и ссылок).',
   confirm: 'Проверьте данные и отправьте «да», чтобы я собрал релиз в кабинете. «нет» — отменить.',
 }
@@ -238,6 +238,20 @@ export class TelegramBot {
     if (state.field === 'audio') {
       const doc = msg.document ?? msg.audio ?? null
       // Ссылка на файл — обход лимита Telegram в 20 МБ на скачивание ботом.
+      // Локальный путь — удобно, когда бот и файл на одной машине.
+      if (!doc && /^(\/|~\/)/.test(text)) {
+        const p = text.startsWith('~') ? text.replace('~', process.env.HOME ?? '') : text
+        try {
+          const path = await this.useLocalFile(p)
+          const info = await checkWav(path)
+          if (!info.ok) return void this.say(chatId, info.reason)
+          data.audioPath = path
+          data.audioTitle = basename(path)
+          return next('cover')
+        } catch (e) {
+          return void this.say(chatId, `Не нашёл файл: ${String(e).slice(0, 120)}`)
+        }
+      }
       if (!doc && /^https?:\/\//i.test(text)) {
         try {
           const path = await this.downloadUrl(text)
@@ -305,6 +319,16 @@ export class TelegramBot {
     }
   }
 
+  private async useLocalFile(path: string): Promise<string> {
+    const dir = join(this.deps.dir, 'telegram')
+    await mkdir(dir, { recursive: true })
+    const buf = await readFile(path)
+    if (buf.length > 120 * 1024 * 1024) throw new Error('файл больше 120 МБ')
+    const dest = join(dir, `${Date.now()}-${basename(path).replace(/[^\w.\-а-яА-Я]+/gu, '_')}`)
+    await writeFile(dest, buf)
+    return dest
+  }
+
   private async downloadUrl(rawUrl: string): Promise<string> {
     const dir = join(this.deps.dir, 'telegram')
     await mkdir(dir, { recursive: true })
@@ -345,10 +369,10 @@ export class TelegramBot {
   }
 }
 
-async function checkWav(path: string): Promise<{ ok: boolean; reason: string }> {
+export async function checkWav(path: string): Promise<{ ok: boolean; reason: string }> {
   const buf = await readFile(path)
   if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
-    return { ok: false, reason: 'Файл не похож на WAV. Пришлите WAV 16/24 бит, 44100 Гц.' }
+    return { ok: false, reason: 'Файл не похож на WAV. Пришлите WAV 44100 Гц (16/24/32 бита).' }
   }
   let pos = 12
   while (pos + 8 <= buf.length) {
@@ -359,7 +383,8 @@ async function checkWav(path: string): Promise<{ ok: boolean; reason: string }> 
       const rate = buf.readUInt32LE(pos + 12)
       const bits = buf.readUInt16LE(pos + 22)
       if (rate !== 44100) return { ok: false, reason: `Частота ${rate} Гц — нужна 44100 Гц.` }
-      if (bits !== 16 && bits !== 24) return { ok: false, reason: `Битность ${bits} — нужны 16 или 24 бита.` }
+      // 32-bit float мастера тоже принимаем: портал их берёт.
+      if (![16, 24, 32].includes(bits)) return { ok: false, reason: `Битность ${bits} — нужны 16, 24 или 32 бита.` }
       if (channels < 1) return { ok: false, reason: 'В файле нет аудиоканалов.' }
       return { ok: true, reason: `${bits} бит / ${rate} Гц` }
     }
@@ -368,7 +393,7 @@ async function checkWav(path: string): Promise<{ ok: boolean; reason: string }> 
   return { ok: false, reason: 'Не нашёл параметры WAV. Пришлите WAV 16/24 бит, 44100 Гц.' }
 }
 
-async function checkPng(path: string): Promise<{ ok: boolean; reason: string }> {
+export async function checkPng(path: string): Promise<{ ok: boolean; reason: string }> {
   const buf = await readFile(path)
   if (buf.length < 24 || buf.toString('ascii', 1, 4) !== 'PNG') {
     return { ok: false, reason: 'Нужен PNG-файл 3000×3000.' }
