@@ -28,6 +28,8 @@ export class Db {
     if (!names.has('tool_call_id')) this.raw.exec(`ALTER TABLE messages ADD COLUMN tool_call_id TEXT`)
     const actionCols = new Set(this.all<{ name: string }>(`PRAGMA table_info(pending_actions)`).map((c) => c.name))
     if (!actionCols.has('placeholder_id')) this.raw.exec(`ALTER TABLE pending_actions ADD COLUMN placeholder_id TEXT`)
+    const subCols = new Set(this.all<{ name: string }>(`PRAGMA table_info(tg_submissions)`).map((c) => c.name))
+    if (subCols.size && !subCols.has('lyrics')) this.raw.exec(`ALTER TABLE tg_submissions ADD COLUMN lyrics TEXT`)
   }
 
   all<T = Row>(sql: string, ...params: unknown[]): T[] {

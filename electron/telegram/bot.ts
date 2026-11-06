@@ -25,22 +25,25 @@ export interface BotReleaseResult {
   text: string
 }
 
-type Field = 'title' | 'artist' | 'genres' | 'description' | 'releaseDate' | 'audio' | 'cover' | 'confirm'
+type Field = 'title' | 'artist' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'lyrics' | 'audio' | 'cover' | 'confirm'
 
 interface ChatState {
   field: Field
-  data: Partial<BotReleaseSpec> & { author?: string; description?: string; audioTitle?: string; coverTitle?: string; chatId?: number; username?: string }
+  data: Partial<BotReleaseSpec> & { author?: string; description?: string; lyrics?: string; audioTitle?: string; coverTitle?: string; chatId?: number; username?: string }
 }
 
 const QUESTIONS: Record<Field, string> = {
-  title: '1/7. Как называется релиз? (например: Open my eyes)',
-  artist: '2/7. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, автор — этот же исполнитель, доля 100%, explicit — да.',
-  genres: '3/7. Жанры через запятую (например: Rap, Alternative Rap).',
-  description: '4/7. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
+  title: '1/9. Как называется релиз? (например: Open my eyes)',
+  artist: '2/9. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, автор — этот же исполнитель, доля 100%.',
+  genres: '3/9. Жанры через запятую (например: Rap, Alternative Rap).',
+  description: '4/9. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
   releaseDate:
-    '5/7. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
-  audio: '6/7. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
-  cover: '7/7. Пришлите обложку PNG или JPG, минимум 1500×1500 px (1:1, без логотипов и ссылок).',
+    '5/9. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
+  explicit: '6/9. В треке есть ненормативная лексика (мат)? Ответьте «да» или «нет».',
+  lyrics:
+    '7/9. Пришлите текст песни.\nЕсли мата нет — текст обязателен. Если мат есть — можно пропустить: отправьте «-».',
+  audio: '8/9. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
+  cover: '9/9. Пришлите обложку PNG или JPG, минимум 1500×1500 px (1:1, без логотипов и ссылок).',
   confirm: 'Проверьте данные и отправьте «да» — отправлю заявку в приложение Broma 16 Assistant на проверку. «нет» — отменить.',
 }
 
@@ -57,6 +60,7 @@ export interface BotSubmission {
   explicit: boolean
   author: string
   description: string
+  lyrics: string
   audioPath: string
   audioName: string
   coverPath: string
@@ -232,8 +236,24 @@ export class TelegramBot {
       const days = Math.ceil((date.getTime() - Date.now()) / 86_400_000)
       if (days < 7) return void this.say(chatId, `Сайт требует минимум 7 дней до релиза. Сейчас до даты ${days} дн. Пришлите другую.`)
       data.releaseDate = `${String(m[1]).padStart(2, '0')}.${String(m[2]).padStart(2, '0')}.${m[3]}`
-      // По умолчанию всегда explicit: если мата нет, сайт потребует текст песни.
-      data.explicit = true
+      return next('explicit')
+    }
+
+    if (state.field === 'explicit') {
+      const yes = /^(да|yes|есть|1)$/i.test(text)
+      const no = /^(нет|no|0)$/i.test(text)
+      if (!yes && !no) return void this.say(chatId, 'Ответьте «да» или «нет».')
+      data.explicit = yes
+      return next('lyrics')
+    }
+
+    if (state.field === 'lyrics') {
+      const skip = !text || text === '-'
+      if (!skip && text.length > 6000) return void this.say(chatId, 'Текст длинноват — сократите до 6000 символов.')
+      if (skip && !data.explicit) {
+        return void this.say(chatId, 'Мата нет — без текста песни сайт не примет релиз. Пришлите текст (можно одним сообщением).')
+      }
+      data.lyrics = skip ? '' : text
       return next('audio')
     }
 
@@ -312,9 +332,10 @@ export class TelegramBot {
         label: data.label!,
         genres: data.genres!,
         releaseDate: data.releaseDate!,
-        explicit: true,
+        explicit: Boolean(data.explicit),
         author: data.author ?? `${data.artist}, 100`,
         description: data.description ?? '',
+        lyrics: data.lyrics ?? '',
         audioPath: data.audioPath!,
         audioName: data.audioTitle ?? 'audio.wav',
         coverPath: data.coverPath!,

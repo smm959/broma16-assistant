@@ -189,6 +189,27 @@ export default function InboxScreen() {
                     </div>
                   </div>
 
+                  {detail.lyrics ? (
+                    <div style={{ marginTop: 18 }}>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Текст песни</div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                          maxHeight: 220,
+                          overflowY: 'auto',
+                          padding: 12,
+                          borderRadius: 10,
+                          border: '1px solid var(--line-soft)',
+                          background: 'var(--panel-2)',
+                        }}
+                      >
+                        {detail.lyrics}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '8px 14px', marginTop: 20, fontSize: 13 }}>
                     <span style={{ color: 'var(--muted)' }}>Автор и доля</span>
                     <span>{detail.author ?? '—'}</span>

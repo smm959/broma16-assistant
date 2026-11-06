@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS tg_submissions (
   explicit INTEGER NOT NULL DEFAULT 0,
   author TEXT,
   description TEXT,
+  lyrics TEXT,
   audio_path TEXT NOT NULL,
   audio_name TEXT,
   cover_path TEXT NOT NULL,
