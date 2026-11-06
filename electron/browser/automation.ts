@@ -835,13 +835,47 @@ export class BrowserAutomation {
       const requested = (await dbg.sendCommand('DOM.requestNode', { objectId })) as { nodeId?: number }
       if (!requested?.nodeId) return { ok: false, note: 'Не удалось получить узел поля загрузки' }
       await dbg.sendCommand('DOM.setFileInputFiles', { files: paths, nodeId: requested.nodeId })
-      const files = (await this.ev(win, 
+      let files = (await this.ev(win, 
         `(() => { const el = document.querySelectorAll('input[type=file]')[${index}]; return el ? [...el.files].map(f => ({ name: f.name, size: f.size })) : [] })()`,
         true,
       )) as { name: string; size: number }[]
+
+      if (!files.length) {
+        // Сайт иногда пересоздаёт input: ловим системный file chooser и подкладываем файл туда.
+        try {
+          await dbg.sendCommand('Page.enable').catch(() => undefined)
+          await dbg.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true })
+          let backendNodeId: number | undefined
+          const onMsg = (_e: unknown, method: string, params: any) => {
+            if (method === 'Page.fileChooserOpened' && params?.backendNodeId) backendNodeId = params.backendNodeId
+          }
+          dbg.on('message', onMsg as any)
+          await this.ev(
+            win,
+            `(() => { const el = document.querySelectorAll('input[type=file]')[${index}]; const box = el && (el.closest('label') || el.parentElement || el); (box || el).click(); return true })()`,
+            true,
+          ).catch(() => undefined)
+          await new Promise((r) => setTimeout(r, 900))
+          ;(dbg as any).off?.('message', onMsg as any)
+          await dbg.sendCommand('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined)
+          if (backendNodeId) {
+            await dbg.sendCommand('DOM.setFileInputFiles', { files: paths, backendNodeId })
+            await new Promise((r) => setTimeout(r, 1200))
+            files = (await this.ev(win, 
+              `(() => { const el = document.querySelectorAll('input[type=file]')[${index}]; return el ? [...el.files].map(f => ({ name: f.name, size: f.size })) : [] })()`,
+              true,
+            )) as { name: string; size: number }[]
+          }
+        } catch {
+          /* пробуем дальше по странице */
+        }
+      }
+
+      const page = await this.ev(win, `document.body ? document.body.innerText : ''`, true).catch(() => '')
+      const pageOk = paths.some((p) => String(page).includes(p.split('/').pop() ?? '')) || /Удалить/.test(String(page))
       return {
-        ok: files.length > 0,
-        note: files.length ? `Прикреплено файлов: ${files.length}` : 'Браузер не подтвердил прикрепление файлов',
+        ok: files.length > 0 || pageOk,
+        note: files.length ? `Прикреплено файлов: ${files.length}` : pageOk ? 'Файл принят страницей' : 'Браузер не подтвердил прикрепление файлов',
         files,
       }
     } catch (e) {

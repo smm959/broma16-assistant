@@ -224,6 +224,14 @@ export class ReleaseWizard {
       }
 
       if (step === 'authors') {
+        // Редактор авторов, как и лирика, открывается стрелкой у трека.
+        const beforeAuthors = await this.fields()
+        if (!beforeAuthors.some((x) => x.key === 'ph:Автор #1')) {
+          await this.browser
+            .evaluateRaw(`(() => { const t = document.querySelector('img[class*="_toogleMenu_"]'); if (t) { t.click(); return true } return false })()`)
+            .catch(() => undefined)
+          await sleep(1200)
+        }
         const authors = (spec.authors?.length ? spec.authors : [spec.artist]).map((a) => String(a).trim()).filter(Boolean).slice(0, 8)
         const base = Math.floor(100 / authors.length)
         const shares = authors.map((_, i) => (i === 0 ? 100 - base * (authors.length - 1) : base))
@@ -285,8 +293,9 @@ export class ReleaseWizard {
           const idx = inputs.findIndex((x) => /jpg|jpeg|png|image/i.test(x.accept ?? '')) ?? 0
           const up = await this.browser.uploadFiles(idx < 0 ? 0 : idx, files.map((f) => f.path))
           if (!up.ok) {
-            const after = await this.browser.read({ maxChars: 5000 })
-            if (!/Удалить/.test(after.text)) return this.fail('cover', `Не удалось прикрепить обложку: ${up.note}`)
+            // Сайт обрабатывает файл несколько секунд — ждём появления «Удалить».
+            const done = await this.waitText(/Удалить/, 25_000)
+            if (!done) return this.fail('cover', `Не удалось прикрепить обложку: ${up.note}`)
           }
           notes.push(`Обложка: ${files[0]!.filename}`)
         } else {
@@ -387,6 +396,17 @@ export class ReleaseWizard {
     }
     const put = await this.browser.apiFetch(`/repertoire/release/${releaseId}/recording/${track.id}`, { method: 'PUT', body: payload })
     return put.status === 200
+  }
+
+  /** Ждём, пока на странице появится текст (например, «Удалить» после загрузки файла). */
+  private async waitText(re: RegExp, timeoutMs = 20_000): Promise<boolean> {
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const page = await this.browser.read({ maxChars: 4000 }).catch(() => null)
+      if (page && re.test(page.text)) return true
+      await sleep(1000)
+    }
+    return false
   }
 
   private async waitForStep(step: WizardStep, timeoutMs = 8000): Promise<boolean> {
