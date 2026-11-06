@@ -25,7 +25,7 @@ export interface BotReleaseResult {
   text: string
 }
 
-type Field = 'title' | 'artist' | 'label' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'author' | 'audio' | 'cover' | 'confirm'
+type Field = 'title' | 'artist' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'audio' | 'cover' | 'confirm'
 
 interface ChatState {
   field: Field
@@ -33,18 +33,15 @@ interface ChatState {
 }
 
 const QUESTIONS: Record<Field, string> = {
-  title: '1/10. Как называется релиз? (например: Open my eyes)',
-  artist: '2/10. Кто исполнитель? (например: ELLIWAY)',
-  label: '3/10. Какой лейбл? Отправьте «-», если Music 959.',
-  genres: '4/10. Жанры через запятую (например: Rap, Alternative Rap).',
-  description: '5/10. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
+  title: '1/8. Как называется релиз? (например: Open my eyes)',
+  artist: '2/8. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, автор — этот же исполнитель, доля 100%.',
+  genres: '3/8. Жанры через запятую (например: Rap, Alternative Rap).',
+  description: '4/8. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
   releaseDate:
-    '6/10. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
-  explicit: '7/10. В треке есть ненормативная лексика? Ответьте «да» или «нет».',
-  author:
-    '8/10. Автор слов и музыки?\nОтправьте имя и долю через запятую (например: ELLIWAY, 100).\nЕсли автор — исполнитель и доля 100%, отправьте «-».',
-  audio: '9/10. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
-  cover: '10/10. Пришлите обложку PNG 3000×3000 px (1:1, без логотипов и ссылок).',
+    '5/8. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
+  explicit: '6/8. В треке есть ненормативная лексика? Ответьте «да» или «нет».',
+  audio: '7/8. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
+  cover: '8/8. Пришлите обложку PNG или JPG, минимум 1500×1500 px (1:1, без логотипов и ссылок).',
   confirm: 'Проверьте данные и отправьте «да» — отправлю заявку в приложение Broma 16 Assistant на проверку. «нет» — отменить.',
 }
 
@@ -208,11 +205,8 @@ export class TelegramBot {
     if (state.field === 'artist') {
       if (!text) return void this.say(chatId, 'Нужно имя исполнителя текстом.')
       data.artist = text.slice(0, 80)
-      return next('label')
-    }
-
-    if (state.field === 'label') {
-      data.label = !text || text === '-' ? 'Music 959' : text.slice(0, 80)
+      data.label = 'Music 959'
+      data.author = `${data.artist}, 100`
       return next('genres')
     }
 
@@ -247,15 +241,6 @@ export class TelegramBot {
         return void this.say(chatId, 'Ответьте «да» или «нет».')
       }
       data.explicit = /^(да|yes|есть|1)$/i.test(text)
-      return next('author')
-    }
-
-    if (state.field === 'author') {
-      if (!text || text === '-') {
-        data.author = `${data.artist ?? ''}, 100`
-      } else {
-        data.author = text.slice(0, 120)
-      }
       return next('audio')
     }
 
@@ -308,12 +293,13 @@ export class TelegramBot {
 
     if (state.field === 'cover') {
       const doc = msg.document ?? (msg.photo ? { file_id: msg.photo[msg.photo.length - 1].file_id, file_name: 'cover.png' } : null)
-      if (!doc) return void this.say(chatId, 'Нужна обложка PNG 3000×3000.')
+      if (!doc) return void this.say(chatId, 'Нужна обложка PNG или JPG, минимум 1500×1500 px.')
       const name = String(doc.file_name ?? 'cover.png')
-      if (!/\.png$/i.test(name)) return void this.say(chatId, 'Обложка должна быть PNG 3000×3000 px.')
+      if (!/\.(png|jpe?g)$/i.test(name)) return void this.say(chatId, 'Обложка должна быть PNG или JPG, минимум 1500×1500 px.')
       const path = await this.download(doc.file_id, name)
-      const dim = await checkPng(path)
+      const dim = await checkImage(path)
       if (!dim.ok) return void this.say(chatId, dim.reason)
+      this.deps.log(`[telegram] cover ${name}: ${dim.reason}`)
       data.coverPath = path
       data.coverTitle = name
       return next('confirm')
@@ -433,13 +419,32 @@ export async function checkWav(path: string): Promise<{ ok: boolean; reason: str
   return { ok: false, reason: 'Не нашёл параметры WAV. Пришлите WAV 44100/48000 Гц (16/24/32 бита).' }
 }
 
-export async function checkPng(path: string): Promise<{ ok: boolean; reason: string }> {
+export async function checkImage(path: string): Promise<{ ok: boolean; reason: string }> {
   const buf = await readFile(path)
-  if (buf.length < 24 || buf.toString('ascii', 1, 4) !== 'PNG') {
-    return { ok: false, reason: 'Нужен PNG-файл 3000×3000.' }
+  let w = 0
+  let h = 0
+  if (buf.length >= 24 && buf.toString('ascii', 1, 4) === 'PNG') {
+    w = buf.readUInt32BE(16)
+    h = buf.readUInt32BE(20)
+  } else if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xff) {
+        i++
+        continue
+      }
+      const marker = buf[i + 1]!
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        h = buf.readUInt16BE(i + 5)
+        w = buf.readUInt16BE(i + 7)
+        break
+      }
+      const len = buf.readUInt16BE(i + 2)
+      i += 2 + (len > 0 ? len : 1)
+    }
   }
-  const w = buf.readUInt32BE(16)
-  const h = buf.readUInt32BE(20)
-  if (w < 3000 || h < 3000) return { ok: false, reason: `Обложка ${w}×${h} — нужна 3000×3000 px или больше.` }
+  if (!w || !h) return { ok: false, reason: 'Не удалось прочитать картинку. Нужен PNG или JPG.' }
+  if (w < 1500 || h < 1500) return { ok: false, reason: `Обложка ${w}×${h} — минимум 1500×1500 px.` }
+  if (Math.abs(w - h) > 2) return { ok: false, reason: `Обложка ${w}×${h} — нужен квадрат 1:1.` }
   return { ok: true, reason: `${w}×${h}` }
 }
