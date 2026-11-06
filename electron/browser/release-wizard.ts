@@ -87,12 +87,14 @@ export class ReleaseWizard {
     return res.ok
   }
 
-  private async clickNext(expect: WizardStep, timeoutMs = 12_000): Promise<boolean> {
-    await this.browser.click('Далее')
-    const started = Date.now()
-    while (Date.now() - started < timeoutMs) {
-      if ((await this.stepOf()) === expect) return true
-      await sleep(400)
+  private async clickNext(expect: WizardStep, timeoutMs = 20_000): Promise<boolean> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await this.browser.click('Далее')
+      const started = Date.now()
+      while (Date.now() - started < timeoutMs / 2) {
+        if ((await this.stepOf()) === expect) return true
+        await sleep(400)
+      }
     }
     return (await this.stepOf()) === expect
   }
@@ -170,6 +172,8 @@ export class ReleaseWizard {
       }
 
       if (step === 'tracks') {
+        const relId = /\/release\/(\d+)/.exec((await this.state()).url)?.[1]
+        if (relId) await this.syncTrackViaApi(relId, spec)
         const f = await this.fields()
         const has = (k: string) => f.some((x) => x.key === k)
         if (has('ph:Название')) await this.fill('ph:Название', spec.title)
@@ -192,28 +196,46 @@ export class ReleaseWizard {
 
       if (step === 'authors') {
         await this.fillAuthor(spec.artist)
-        if (!(await this.clickNext('lyrics'))) return this.fail('authors', '«Далее» на «Авторах» не сработала. Проверь автора и доли.')
+        // Роль и «доля контролируется мной» — без них шаг не сохраняется.
+        await this.browser.chooseOption('ph:Роль автора #1', 'CA - Автор слов и музыки').catch(() => undefined)
+        await this.browser.fillField('id:controlled_by_submitter_0', 'true').catch(() => undefined)
+        await sleep(500)
+        await this.browser.click('Сохранить')
+        await sleep(1200)
+        if (!(await this.clickNext('lyrics'))) return this.fail('authors', '«Далее» на «Авторах» не сработала. Проверь автора, роль и галочку «доля контролируется мной».')
         continue
       }
 
       if (step === 'lyrics') {
-        if (spec.explicit) await this.checkExplicit()
+        await this.browser.chooseOption('wrap:language', 'Русский').catch(() => undefined)
+        await this.browser.chooseOption('wrap:parental_warning_type', spec.explicit ? 'Присутствует' : 'Отсутствует').catch(() => undefined)
+        await this.browser.fillField('id:responsibility', 'true').catch(() => undefined)
         if (spec.lyrics) {
           const f = await this.fields()
-          if (f.some((x) => x.key.startsWith('ph:'))) await this.fill('ph:Текст', spec.lyrics)
+          const textKey = f.find((x) => /Текст/i.test(x.placeholder ?? ''))?.key
+          if (textKey) await this.fill(textKey, spec.lyrics)
         }
-        if (!(await this.clickNext('cover'))) return this.fail('lyrics', '«Далее» на «Лирике» не сработала.')
+        await sleep(500)
+        await this.browser.click('Сохранить')
+        await sleep(1200)
+        if (!(await this.clickNext('cover'))) return this.fail('lyrics', '«Далее» на «Лирике» не сработала (язык/ненормативная лексика/225-ФЗ).')
         continue
       }
 
       if (step === 'cover') {
-        const files = this.resolveFiles(spec.coverId ? [spec.coverId] : [])
-        if (!files.length) return this.fail('cover', 'Нет обложки в диалоге (coverId пуст).')
         const inputs = await this.browser.listFileInputs()
-        const idx = inputs.findIndex((x) => /jpg|jpeg|png|image/i.test(x.accept ?? '')) ?? 0
-        const up = await this.browser.uploadFiles(idx < 0 ? 0 : idx, files.map((f) => f.path))
-        if (!up.ok) return this.fail('cover', `Не удалось прикрепить обложку: ${up.note}`)
-        notes.push(`Обложка: ${files[0]!.filename}`)
+        const page = await this.browser.read({ maxChars: 3000 })
+        const alreadyUploaded = inputs.length === 0 || /Удалить/.test(page.text)
+        if (!alreadyUploaded) {
+          const files = this.resolveFiles(spec.coverId ? [spec.coverId] : [])
+          if (!files.length) return this.fail('cover', 'Нет обложки в диалоге (coverId пуст).')
+          const idx = inputs.findIndex((x) => /jpg|jpeg|png|image/i.test(x.accept ?? '')) ?? 0
+          const up = await this.browser.uploadFiles(idx < 0 ? 0 : idx, files.map((f) => f.path))
+          if (!up.ok) return this.fail('cover', `Не удалось прикрепить обложку: ${up.note}`)
+          notes.push(`Обложка: ${files[0]!.filename}`)
+        } else {
+          notes.push('Обложка уже загружена')
+        }
         if (!(await this.clickNext('distribution'))) return this.fail('cover', 'После загрузки обложки «Далее» не сработала.')
         continue
       }
@@ -239,6 +261,42 @@ export class ReleaseWizard {
 
     const s = await this.state()
     return { ok: true, step: s.step ?? 'review', url: s.url, notes }
+  }
+
+  /**
+   * Сохраняет данные трека через внутренний API кабинета.
+   * UI не коммитит исполнителя (main_performer остаётся null) — поэтому пишем напрямую.
+   */
+  private async syncTrackViaApi(releaseId: string, spec: WizardSpec): Promise<boolean> {
+    const data = await this.browser.apiFetch(`/repertoire/release/${releaseId}/data`)
+    if (data.status !== 200) return false
+    let rel: any
+    try {
+      rel = JSON.parse(data.text)?.data ?? JSON.parse(data.text)
+    } catch {
+      return false
+    }
+    const track = (rel.tracks || [])[0]
+    if (!track?.id) return false
+    const isoToday = (() => {
+      const d = new Date()
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })()
+    const payload = {
+      ...track,
+      title: spec.title,
+      created_country_id: track.created_country_id ?? 1,
+      main_performer: [spec.artist],
+      performers: [spec.artist],
+      created_date: isoToday,
+      genres: spec.genres.length ? spec.genres : track.genres,
+      generate_isrc: !spec.isrc,
+      generate_catalog_number: !spec.catalog,
+      ...(spec.isrc ? { isrc: spec.isrc } : {}),
+      ...(spec.catalog ? { catalog_number: spec.catalog } : {}),
+    }
+    const put = await this.browser.apiFetch(`/repertoire/release/${releaseId}/recording/${track.id}`, { method: 'PUT', body: payload })
+    return put.status === 200
   }
 
   private async waitForStep(step: WizardStep, timeoutMs = 8000): Promise<boolean> {

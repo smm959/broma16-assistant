@@ -453,6 +453,30 @@ export class BrowserAutomation {
     }
   }
 
+  /** Запрос к внутреннему API кабинета с токеном из localStorage (детерминированные сценарии). */
+  async apiFetch(path: string, init?: { method?: string; body?: unknown }): Promise<{ status: number; text: string }> {
+    const method = init?.method ?? 'GET'
+    const bodyLiteral = init?.body === undefined ? 'undefined' : JSON.stringify(JSON.stringify(init.body))
+    return this.evaluateRaw(
+      `(async () => {
+        const token = localStorage.getItem('token')
+        const res = await fetch('https://api-rod.broma16.ru/api' + ${JSON.stringify(path)}, {
+          method: ${JSON.stringify(method)},
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'x-access-token': token,
+            'x-client-version': '1.0',
+            'x-requested-with': 'XMLHttpRequest',
+          },
+          body: ${bodyLiteral},
+        })
+        const text = await res.text()
+        return { status: res.status, text }
+      })()`,
+    )
+  }
+
   /** Выполнить произвольный JS на текущей странице (для сценарных шагов). */
   async evaluateRaw(script: string): Promise<any> {
     const win = this.ensureWindow(false)
