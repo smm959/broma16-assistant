@@ -82,6 +82,7 @@ export interface BotDeps {
 export class TelegramBot {
   private offset = 0
   private running = false
+  private username = ''
   private readonly states = new Map<number, ChatState>()
   private readonly base: string
 
@@ -110,6 +111,27 @@ export class TelegramBot {
       this.deps.log(`[telegram] не удалось стартовать: ${String(e).slice(0, 120)}`)
       return null
     })
+    if (me?.username) {
+      this.username = me.username
+      await this.api('setMyCommands', {
+        commands: [
+          { command: 'start', description: 'Новая заявка' },
+          { command: 'new', description: 'Начать заново' },
+          { command: 'status', description: 'Где я сейчас' },
+          { command: 'cancel', description: 'Сбросить заявку' },
+        ],
+        scope: { type: 'all_group_chats' },
+      }).catch(() => undefined)
+      await this.api('setMyCommands', {
+        commands: [
+          { command: 'start', description: 'Новая заявка' },
+          { command: 'new', description: 'Начать заново' },
+          { command: 'status', description: 'Где я сейчас' },
+          { command: 'cancel', description: 'Сбросить заявку' },
+        ],
+        scope: { type: 'all_private_chats' },
+      }).catch(() => undefined)
+    }
     if (!me) {
       this.running = false
       return
@@ -128,11 +150,12 @@ export class TelegramBot {
         const updates = await this.api<any[]>('getUpdates', {
           offset: this.offset,
           timeout: 25,
-          allowed_updates: ['message'],
+          allowed_updates: ['message', 'my_chat_member'],
         })
         for (const u of updates) {
           this.offset = Math.max(this.offset, Number(u.update_id) + 1)
           if (u.message) await this.handle(u.message).catch((e) => this.deps.log(`[telegram] ошибка: ${String(e).slice(0, 200)}`))
+          if (u.my_chat_member) await this.onMembership(u.my_chat_member).catch(() => undefined)
         }
       } catch (e) {
         this.deps.log(`[telegram] polling: ${String(e).slice(0, 160)}`)
@@ -141,27 +164,32 @@ export class TelegramBot {
     }
   }
 
-  private loadState(chatId: number): ChatState {
-    const cached = this.states.get(chatId)
+  private stateKey(chatId: number, userId?: number): string {
+    return userId ? `${KEY(chatId)}:${userId}` : KEY(chatId)
+  }
+
+  private loadState(chatId: number, userId?: number): ChatState {
+    const key = this.stateKey(chatId, userId)
+    const cached = this.states.get(chatId * 1e6 + (userId ?? 0))
     if (cached) return cached
-    const row = this.deps.db.get<{ value: string }>(`SELECT value FROM kv WHERE key = ?`, KEY(chatId))
+    const row = this.deps.db.get<{ value: string }>(`SELECT value FROM kv WHERE key = ?`, key)
     const state: ChatState = row ? (JSON.parse(row.value) as ChatState) : { field: 'title', data: {} }
-    this.states.set(chatId, state)
+    this.states.set(chatId * 1e6 + (userId ?? 0), state)
     return state
   }
 
-  private saveState(chatId: number, state: ChatState): void {
-    this.states.set(chatId, state)
+  private saveState(chatId: number, state: ChatState, userId?: number): void {
+    this.states.set(chatId * 1e6 + (userId ?? 0), state)
     this.deps.db.run(
       `INSERT INTO kv(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      KEY(chatId),
+      this.stateKey(chatId, userId),
       JSON.stringify(state),
     )
   }
 
-  private reset(chatId: number): void {
-    this.states.delete(chatId)
-    this.deps.db.run(`DELETE FROM kv WHERE key = ?`, KEY(chatId))
+  private reset(chatId: number, userId?: number): void {
+    this.states.delete(chatId * 1e6 + (userId ?? 0))
+    this.deps.db.run(`DELETE FROM kv WHERE key = ?`, this.stateKey(chatId, userId))
   }
 
   private async say(chatId: number, text: string, withMenu = false): Promise<void> {
@@ -176,16 +204,51 @@ export class TelegramBot {
     await this.api('sendMessage', payload).catch((e) => this.deps.log(`[telegram] send: ${String(e).slice(0, 120)}`))
   }
 
+  private async onMembership(update: any): Promise<void> {
+    const chat = update?.chat
+    const status = update?.new_chat_member?.status
+    if (!chat || !['member', 'administrator'].includes(status)) return
+    if (chat.type === 'private') return
+    const text = [
+      'Привет! Я собираю заявки на релизы для Broma 16.',
+      '',
+      'Как пользоваться в группе:',
+      '1. Напишите /start — я пошагово спрошу данные.',
+      '2. Или обратитесь ко мне: @' + this.username + ' новая заявка',
+      '3. Каждый участник заполняет свою заявку отдельно — состояние не пересекается.',
+      '',
+      'Когда всё заполнено, заявка уходит в приложение Broma 16 Assistant → «Заявки», где её можно послушать, посмотреть обложку и одобрить.',
+    ].join('\n')
+    await this.say(chat.id, text, true)
+    try {
+      const sent = await this.api<any>('sendMessage', { chat_id: chat.id, text })
+      if (sent?.message_id) await this.api('pinChatMessage', { chat_id: chat.id, message_id: sent.message_id, disable_notification: true })
+    } catch {
+      /* без закрепления */
+    }
+  }
+
   private async handle(msg: any): Promise<void> {
     const chatId = Number(msg.chat?.id)
     if (!chatId) return
-    const text = String(msg.text ?? '').trim()
+    const isGroup = msg.chat?.type && msg.chat.type !== 'private'
+    const userId = isGroup ? Number(msg.from?.id) : undefined
+    let text = String(msg.text ?? '').trim()
     const kind = msg.document ? 'document' : msg.audio ? 'audio' : msg.photo ? 'photo' : 'text'
-    this.deps.log(`[telegram] ${chatId}: ${kind}`)
+    this.deps.log(`[telegram] ${chatId}${isGroup ? `:${userId}` : ''}: ${kind}`)
+
+    if (isGroup) {
+      const mentioned = this.username ? text.toLowerCase().includes('@' + this.username.toLowerCase()) : false
+      const isCommand = /^\//.test(text)
+      const replyToBot = Boolean(msg.reply_to_message?.from?.username && msg.reply_to_message.from.username === this.username)
+      if (!mentioned && !isCommand && !replyToBot) return
+      if (mentioned && this.username) text = text.replace(new RegExp('@' + this.username, 'ig'), '').trim()
+      if (!text) return
+    }
 
     if (/^\/(start|new)$/i.test(text) || /новая\s+заявка/i.test(text)) {
-      this.reset(chatId)
-      this.saveState(chatId, { field: 'title', data: {} })
+      this.reset(chatId, userId)
+      this.saveState(chatId, { field: 'title', data: {} }, userId)
       await this.say(
         chatId,
         'Привет! Соберу релиз в Broma 16.\nКнопки внизу: «🆕 Новая заявка» — начать заново, «♻️ Сбросить» — отменить текущую.',
@@ -195,22 +258,22 @@ export class TelegramBot {
       return
     }
     if (/^\/(cancel|stop)$/i.test(text) || /сброс/i.test(text)) {
-      this.reset(chatId)
+      this.reset(chatId, userId)
       await this.say(chatId, 'Сбросил. Нажмите «🆕 Новая заявка», когда будете готовы.', true)
       return
     }
     if (/^\/status$/i.test(text)) {
-      const s = this.loadState(chatId)
+      const s = this.loadState(chatId, userId)
       await this.say(chatId, `Текущий шаг: ${s.field}. /cancel — отменить, /start — заново.`)
       return
     }
 
-    const state = this.loadState(chatId)
+    const state = this.loadState(chatId, userId)
     const data = state.data
 
     const next = (field: Field) => {
       state.field = field
-      this.saveState(chatId, state)
+      this.saveState(chatId, state, userId)
       void this.say(chatId, QUESTIONS[field])
     }
 
@@ -345,7 +408,7 @@ export class TelegramBot {
 
     if (state.field === 'confirm') {
       if (/^(нет|no|отмена)$/i.test(text)) {
-        this.reset(chatId)
+        this.reset(chatId, userId)
         return void this.say(chatId, 'Отменил. «🆕 Новая заявка» — начать заново.', true)
       }
       if (!/^(да|yes|ок|ok)$/i.test(text)) return void this.say(chatId, 'Отправьте «да» для сборки или «нет» для отмены.')
@@ -380,7 +443,7 @@ export class TelegramBot {
             audioPath: submission.audioPath,
             coverPath: submission.coverPath,
           }).catch((e) => ({ ok: false, text: String(e).slice(0, 300) }))
-      this.reset(chatId)
+      this.reset(chatId, userId)
       await this.say(chatId, res.text, true)
       return
     }
