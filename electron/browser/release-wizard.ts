@@ -135,7 +135,13 @@ export class ReleaseWizard {
   async run(spec: WizardSpec): Promise<WizardResult> {
     const notes: string[] = []
     let current = await this.stepOf()
-    if (!current) return this.fail('start', 'Не удалось определить шаг визарда. Открой создание релиза в кабинете.')
+    if (!current) {
+      // Визард можно звать откуда угодно: сами открываем создание релиза.
+      await this.browser.open('https://rod.broma16.ru/release/create').catch(() => undefined)
+      await sleep(3000)
+      current = await this.stepOf()
+    }
+    if (!current) return this.fail('start', 'Не удалось открыть создание релиза в кабинете.')
 
     const startIdx = spec.from ? ORDER.indexOf(spec.from) : ORDER.indexOf(current)
     const fromIdx = Math.max(startIdx, ORDER.indexOf(current))

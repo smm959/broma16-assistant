@@ -472,7 +472,7 @@ export class AgentOrchestrator {
    */
   /** Инструмент не должен подвешивать диалог: ограничиваем выполнение по времени. */
   private async runTool(def: ToolDef, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
-    const timeoutMs = 60_000
+    const timeoutMs = def.timeoutMs ?? 60_000
     let timer: NodeJS.Timeout | undefined
     try {
       return await Promise.race([
@@ -482,7 +482,7 @@ export class AgentOrchestrator {
             () =>
               reject(
                 new Error(
-                  'Инструмент не ответил за 60 секунд — похоже, страница кабинета зависла. Переоткрой кабинет (account_open) и повтори действие.',
+                  `Инструмент не ответил за ${Math.round((def.timeoutMs ?? 60_000) / 1000)} секунд — похоже, страница кабинета зависла. Переоткрой кабинет (account_open) и повтори действие.`,
                 ),
               ),
             timeoutMs,

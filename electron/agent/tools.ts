@@ -38,6 +38,8 @@ export interface ToolDef {
   risk: Risk | ((args: Record<string, any>) => Risk)
   parameters: Record<string, unknown>
   title?: (args: Record<string, any>) => string
+  /** Индивидуальный лимит выполнения (мс). Для долгих сценариев вроде release_wizard. */
+  timeoutMs?: number
   preview?: (args: Record<string, any>, ctx: ToolContext) => {
     to?: string
     subject?: string
@@ -591,6 +593,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'release_wizard',
+    timeoutMs: 10 * 60_000,
     description:
       'Детерминированно провести визард релиза Broma 16: Релиз → Файлы → Фонограммы → Авторы → Лирика → Обложка → Дистрибуция → Обзор. Заполняет по карте шагов, прикрепляет аудио/обложку из вложений диалога, НЕ нажимает «Отправить на модерацию». Возвращает шаг, URL и точную причину, если шаг не прошёл.',
     risk: 'safe',
