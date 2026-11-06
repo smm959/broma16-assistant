@@ -284,7 +284,41 @@ export class ReleaseWizard {
       }
 
       if (step === 'distribution') {
+        const relId = /\/release\/(\d+)/.exec((await this.state()).url)?.[1]
+        // Новый релиз: «Релиз ранее уже был опубликован» — снять, дату первой публикации не трогать.
+        const f0 = await this.fields()
+        const pub = f0.find((x) => x.key === 'id:is_published_before')
+        if (pub?.checked) await this.browser.fillField('id:is_published_before', 'false').catch(() => undefined)
+        if (relId) {
+          const data = await this.browser.apiFetch(`/repertoire/release/${relId}/data`).catch(() => null)
+          const created = (() => {
+            try {
+              return data ? (JSON.parse(data.text)?.data?.created_date ?? JSON.parse(data.text)?.created_date) : null
+            } catch {
+              return null
+            }
+          })()
+          if (created) {
+            // Дата первой публикации осталась от чужого релиза — чистим через форму.
+            await this.browser.fillField('id:is_published_before', 'true').catch(() => undefined)
+            await sleep(400)
+            await this.browser.fillField('ph:Дата первой публикации релиза', '').catch(() => undefined)
+            await this.browser.fillField('id:is_published_before', 'false').catch(() => undefined)
+            await sleep(400)
+          }
+        }
         if (spec.releaseDate) {
+          // Минимум 7 дней от сегодня.
+          const m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/.exec(spec.releaseDate)
+          if (m) {
+            const target = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]))
+            const min = new Date()
+            min.setHours(0, 0, 0, 0)
+            min.setDate(min.getDate() + 7)
+            if (target < min) {
+              return this.fail('distribution', `Дата релиза ${spec.releaseDate} слишком близко: сайт требует минимум 7 дней (не раньше ${min.toLocaleDateString('ru-RU')}).`)
+            }
+          }
           await this.browser.click('Выбор желаемой даты')
           await sleep(800)
           const f = await this.fields()
