@@ -235,13 +235,23 @@ export class ReleaseWizard {
       }
 
       if (step === 'lyrics') {
+        // Редактор лирики открывается кликом по стрелке у трека.
+        const before = await this.fields()
+        if (!before.some((x) => x.key === 'wrap:language')) {
+          await this.browser
+            .evaluateRaw(
+              `(() => { const t = document.querySelector('img[class*="_toogleMenu_"]'); if (t) { t.click(); return true } return false })()`,
+            )
+            .catch(() => undefined)
+          await sleep(1200)
+        }
         await this.browser.chooseOption('wrap:language', 'Русский').catch(() => undefined)
         await this.browser.chooseOption('wrap:parental_warning_type', spec.explicit ? 'Присутствует' : 'Отсутствует').catch(() => undefined)
         await this.browser.fillField('id:responsibility', 'true').catch(() => undefined)
         if (spec.lyrics) {
-          const f = await this.fields()
-          const textKey = f.find((x) => /Текст/i.test(x.placeholder ?? ''))?.key
-          if (textKey) await this.fill(textKey, spec.lyrics)
+          const typed = await this.browser.typeRichText(spec.lyrics).catch(() => ({ ok: false, note: 'ошибка' }))
+          if (!typed.ok) return this.fail('lyrics', `Не удалось ввести текст песни: ${typed.note}`)
+          notes.push(`Текст песни: ${spec.lyrics.length} симв.`)
         }
         await sleep(500)
         await this.browser.click('Сохранить')

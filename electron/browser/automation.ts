@@ -1088,6 +1088,47 @@ export class BrowserAutomation {
     }
   }
 
+  /** Ввод в rich-text редактор (Draft.js contenteditable) — например, текст песни. */
+  async typeRichText(text: string): Promise<{ ok: boolean; note: string }> {
+    const win = this.ensureWindow(false)
+    await this.ensurePage(win)
+    await this.waitReady(win)
+    const focused = await this.ev(
+      win,
+      `(() => {
+        const el = document.querySelector('.public-DraftEditor-content, [contenteditable="true"]')
+        if (!el) return false
+        el.focus()
+        const sel = window.getSelection()
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        sel && sel.removeAllRanges()
+        sel && sel.addRange(range)
+        return true
+      })()`,
+      true,
+    )
+    if (!focused) return { ok: false, note: 'Не нашёл поле для текста' }
+    try {
+      const dbg = win.webContents.debugger
+      if (!dbg.isAttached()) dbg.attach('1.3')
+      // Удаляем выделенное (если было) и печатаем как человек.
+      await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+      await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+      await dbg.sendCommand('Input.insertText', { text })
+      await new Promise((r) => setTimeout(r, 400))
+      const got = (await this.ev(
+        win,
+        `(() => { const el = document.querySelector('.public-DraftEditor-content, [contenteditable="true"]'); return el ? (el.innerText || '') : '' })()`,
+        true,
+      )) as string
+      const ok = String(got).replace(/\s+/g, ' ').trim().length > 0
+      return { ok, note: ok ? `Текст введён (${String(got).length} симв.)` : 'Текст не появился в редакторе' }
+    } catch (e) {
+      return { ok: false, note: String(e).slice(0, 120) }
+    }
+  }
+
   /** Выбрать значение в кастомном выпадающем списке (PrimeNG select/dropdown/autocomplete) или нативном select. */
   async chooseOption(
     target: string | number,
