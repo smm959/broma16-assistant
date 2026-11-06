@@ -137,8 +137,9 @@ export class ReleaseWizard {
     const notes: string[] = []
     if (spec.from === 'release') {
       // «С нуля»: идём через дашборд и кнопку «Добавить релиз» — прямой /release/create даёт 404.
-      const accountId = (await this.browser.evaluateRaw('localStorage.getItem("accountId") || "870645"').catch(() => '870645')) || '870645'
-      await this.browser.open(`https://rod.broma16.ru/accounts/${accountId}/dashboard`).catch(() => undefined)
+      const accountId = String((await this.browser.evaluateRaw('localStorage.getItem("accountId") || ""').catch(() => '')) || '')
+      const startUrl = accountId ? `https://rod.broma16.ru/accounts/${accountId}/dashboard` : 'https://rod.broma16.ru/'
+      await this.browser.open(startUrl).catch(() => undefined)
       await sleep(1500)
       await this.browser.click('Добавить релиз').catch(() => undefined)
       await sleep(3000)
