@@ -216,9 +216,9 @@ function startTelegramBot(svc: Services) {
       const id = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
       svc.db.run(
         `INSERT INTO tg_submissions
-         (id, chat_id, username, title, artist, label, genres, release_date, explicit, author, authors, description, lyrics,
+         (id, chat_id, username, title, artist, label, genres, release_date, explicit, author, authors, performers, description, lyrics,
           audio_path, audio_name, cover_path, cover_name, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         id,
         String(sub.chatId),
         sub.username ?? '',
@@ -230,6 +230,7 @@ function startTelegramBot(svc: Services) {
         sub.explicit ? 1 : 0,
         sub.author,
         sub.authors,
+        sub.performers,
         sub.description,
         sub.lyrics ?? '',
         sub.audioPath,

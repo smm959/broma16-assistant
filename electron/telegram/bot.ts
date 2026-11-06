@@ -25,18 +25,18 @@ export interface BotReleaseResult {
   text: string
 }
 
-type Field = 'title' | 'artist' | 'authors' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'lyrics' | 'audio' | 'cover' | 'confirm'
+type Field = 'title' | 'artist' | 'performers' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'lyrics' | 'audio' | 'cover' | 'confirm'
 
 interface ChatState {
   field: Field
-  data: Partial<BotReleaseSpec> & { author?: string; authors?: string; description?: string; lyrics?: string; audioTitle?: string; coverTitle?: string; chatId?: number; username?: string }
+  data: Partial<BotReleaseSpec> & { author?: string; authors?: string; performers?: string; description?: string; lyrics?: string; audioTitle?: string; coverTitle?: string; chatId?: number; username?: string }
 }
 
 const QUESTIONS: Record<Field, string> = {
   title: '1/10. Как называется релиз? (например: Open my eyes)',
   artist: '2/10. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, доля контролируется вами.',
-  authors:
-    '3/10. Авторы слов и музыки через запятую — в том же порядке, как их добавить в кабинет.\nНапример: smutmuv, badluckclub, ELLIWAY, HUNGER BUCKS\nЕсли автор один и это исполнитель — отправьте «-».',
+  performers:
+    '3/10. Исполнители через запятую — в том же порядке, как их добавить в кабинет.\nНапример: smutmuv, badluckclub, ELLIWAY, HUNGER BUCKS\nЕсли исполнитель один — отправьте «-».',
   genres: '4/10. Жанры через запятую (например: Rap, Alternative Rap).',
   description: '5/10. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
   releaseDate:
@@ -62,6 +62,7 @@ export interface BotSubmission {
   explicit: boolean
   author: string
   authors: string
+  performers: string
   description: string
   lyrics: string
   audioPath: string
@@ -212,15 +213,16 @@ export class TelegramBot {
       if (!text) return void this.say(chatId, 'Нужно имя исполнителя текстом.')
       data.artist = text.slice(0, 80)
       data.label = 'Music 959'
-      return next('authors')
+      return next('performers')
     }
 
-    if (state.field === 'authors') {
+    if (state.field === 'performers') {
       const list = !text || text === '-'
         ? [data.artist!]
         : text.split(',').map((a) => a.trim()).filter(Boolean).slice(0, 8)
-      if (!list.length) return void this.say(chatId, 'Пришлите хотя бы одного автора.')
-      data.authors = list.join(', ')
+      if (!list.length) return void this.say(chatId, 'Пришлите хотя бы одного исполнителя.')
+      data.performers = list.join(', ')
+      data.authors = list[0]
       data.author = list[0]
       return next('genres')
     }
@@ -347,6 +349,7 @@ export class TelegramBot {
         explicit: Boolean(data.explicit),
         author: data.author ?? data.artist!,
         authors: data.authors ?? data.artist!,
+        performers: data.performers ?? data.artist!,
         description: data.description ?? '',
         lyrics: data.lyrics ?? '',
         audioPath: data.audioPath!,

@@ -10,7 +10,7 @@ import type { BrowserAutomation } from './automation.js'
 export interface WizardSpec {
   title: string
   artist: string
-  authors?: string[]
+  performers?: string[]
   label: string
   type?: string
   genres: string[]
@@ -232,9 +232,9 @@ export class ReleaseWizard {
             .catch(() => undefined)
           await sleep(1200)
         }
-        const authors = (spec.authors?.length ? spec.authors : [spec.artist]).map((a) => String(a).trim()).filter(Boolean).slice(0, 8)
-        const base = Math.floor(100 / authors.length)
-        const shares = authors.map((_, i) => (i === 0 ? 100 - base * (authors.length - 1) : base))
+        // В «Авторах» — только первый исполнитель: CA, 100%, доля контролируется мной.
+        const authors = [String((spec.performers?.[0] ?? spec.artist) || spec.artist).trim()].filter(Boolean)
+        const shares = [100]
         for (let i = 0; i < authors.length; i++) {
           const n = i + 1
           if (i > 0) {
@@ -381,12 +381,13 @@ export class ReleaseWizard {
       const d = new Date()
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     })()
+    const list = (spec.performers?.length ? spec.performers : [spec.artist]).map((x) => String(x).trim()).filter(Boolean)
     const payload = {
       ...track,
       title: spec.title,
       created_country_id: track.created_country_id ?? 1,
-      main_performer: [spec.artist],
-      performers: [spec.artist],
+      main_performer: [list[0] ?? spec.artist],
+      performers: list,
       created_date: isoToday,
       genres: spec.genres.length ? spec.genres : track.genres,
       generate_isrc: !spec.isrc,

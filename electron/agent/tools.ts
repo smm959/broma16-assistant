@@ -601,7 +601,7 @@ export const TOOLS: ToolDef[] = [
       {
         title: str('Название релиза'),
         artist: str('Исполнитель'),
-        authors: { type: 'array', items: { type: 'string' }, description: 'Авторы в нужном порядке; первый — автор слов и музыки' },
+        performers: { type: 'array', items: { type: 'string' }, description: 'Исполнители в нужном порядке; первый — автор слов и музыки (доля 100)' },
         label: str('Лейбл'),
         genres: { type: 'array', items: { type: 'string' }, description: 'Жанры, например ["Rap","Alternative Rap"]' },
         type: str('Тип релиза (Сингл/Альбом/EP)'),
@@ -625,7 +625,7 @@ export const TOOLS: ToolDef[] = [
       const res = await wizard.run({
         title: String(args.title),
         artist: String(args.artist),
-        authors: Array.isArray(args.authors) ? args.authors.map(String) : undefined,
+        performers: Array.isArray(args.performers) ? args.performers.map(String) : undefined,
         label: String(args.label),
         genres: Array.isArray(args.genres) ? args.genres.map(String) : [],
         type: args.type ? String(args.type) : 'Сингл',

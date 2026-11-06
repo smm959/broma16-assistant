@@ -31,6 +31,7 @@ export class Db {
     const subCols = new Set(this.all<{ name: string }>(`PRAGMA table_info(tg_submissions)`).map((c) => c.name))
     if (subCols.size && !subCols.has('lyrics')) this.raw.exec(`ALTER TABLE tg_submissions ADD COLUMN lyrics TEXT`)
     if (subCols.size && !subCols.has('authors')) this.raw.exec(`ALTER TABLE tg_submissions ADD COLUMN authors TEXT`)
+    if (subCols.size && !subCols.has('performers')) this.raw.exec(`ALTER TABLE tg_submissions ADD COLUMN performers TEXT`)
   }
 
   all<T = Row>(sql: string, ...params: unknown[]): T[] {

@@ -307,6 +307,7 @@ export interface TgSubmission {
   explicit: boolean
   author: string | null
   authors: string | null
+  performers: string | null
   description: string | null
   lyrics: string | null
   audioPath: string

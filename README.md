@@ -1,6 +1,6 @@
 # Broma 16 Assistant
 
-![macOS build](https://img.shields.io/badge/macOS-DMG%20v1.10.0-black?logo=apple)
+![macOS build](https://img.shields.io/badge/macOS-DMG%20v1.10.1-black?logo=apple)
 ![Windows build](https://img.shields.io/badge/Windows-build%20help%20wanted-yellow)
 
 Персональный desktop-ассистент для работы с музыкальным дистрибьютором **Broma 16**: релизы, отчёты, выплаты, питчинг, Content ID, YouTube, тексты песен и поддержка — в одном окне, обычным языком.
@@ -56,12 +56,12 @@
 ## Установка
 
 **macOS (Apple Silicon):** готовый установщик — в разделе [Releases](https://github.com/smm959/broma16-assistant/releases/latest)
-(`Broma.16.Assistant-1.10.0-arm64.dmg`, ~128 МБ).
+(`Broma.16.Assistant-1.10.1-arm64.dmg`, ~128 МБ).
 
 1. Откройте DMG и перетащите приложение в «Программы».
 2. Сборка не подписана — при первом запуске разрешите её в «Системные настройки → Конфиденциальность и безопасность» (или правый клик → «Открыть»).
 
-SHA-256: `350f97fb736287afd1c59a17f727c72ec72df31c77d93f425675f92d7af37977`
+SHA-256: `fce3b94b11e53b7307a46942ce1e115da530fee5b0a6246da562060dd9aea98a`
 
 **Windows:** установщика пока нет — нужна помощь сообщества, см. раздел ниже.
 
