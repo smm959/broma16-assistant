@@ -873,6 +873,12 @@ export class BrowserAutomation {
     }
 
     const index = resolved.index
+    let typedValue = String(value).trim()
+    const todayDdMmYyyy = () => {
+      const d = new Date()
+      return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
+    }
+    if (/^(сегодня|today|\{\{today\}\})$/i.test(typedValue)) typedValue = todayDdMmYyyy()
     const before = (await this.ev(win, 
       String.raw`(() => {
         const el = ${FIELD_BY_INDEX(index)}
@@ -890,8 +896,12 @@ export class BrowserAutomation {
     )) as any
 
     // Календарь (p-calendar): используем сам виджет, иначе Angular не примет значение.
+    // «Дата создания» всегда сегодняшняя — сайт не принимает будущую дату.
+    if (/дата создания/i.test(String(before.placeholder ?? '')) && /\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}/.test(typedValue)) {
+      typedValue = todayDdMmYyyy()
+    }
     if (before.datepicker) {
-      const dateResult = await this.pickDate(index, String(value).trim())
+      const dateResult = await this.pickDate(index, typedValue)
       const after = await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)
       return {
         ok: dateResult.ok,
