@@ -204,11 +204,10 @@ export class ReleaseWizard {
       }
 
       if (step === 'tracks') {
-        const relId = /\/release\/(\d+)/.exec((await this.state()).url)?.[1]
-        if (relId) {
-          await this.syncTrackViaApi(relId, spec)
-          // После записи через API форма должна перечитаться, иначе «Далее» остаётся disabled.
-          await this.browser.open(`https://rod.broma16.ru/release/${relId}/tracks`).catch(() => undefined)
+        // Редактор трека открывается шевроном в списке.
+        const beforeFields = await this.fields()
+        if (!beforeFields.some((x) => x.key === 'ph:Исполнитель' || x.placeholder === 'Исполнитель')) {
+          await this.browser.click('button[class*="_chevron_"]').catch(() => undefined)
           await sleep(1200)
         }
         const f = await this.fields()
@@ -221,13 +220,22 @@ export class ReleaseWizard {
         if (has('id:isrc_checkbox') && !spec.isrc) await this.fill('id:isrc_checkbox', 'true')
         if (has('id:catalog_number_checkbox') && !spec.catalog) await this.fill('id:catalog_number_checkbox', 'true')
         if (spec.isrc) await this.fill('ph:ISRC', spec.isrc)
-        if (has('ph:Исполнитель')) {
-          await this.fill('ph:Исполнитель', spec.artist)
-          await this.clickAddPerformer()
+
+        // Исполнители — по порядку, каждый новой строкой через «+».
+        const performers = (spec.performers?.length ? spec.performers : [spec.artist]).map((x) => String(x).trim()).filter(Boolean)
+        for (let i = 0; i < performers.length; i++) {
+          if (i > 0) {
+            await this.browser.click('button[class*="_gray_"]').catch(() => undefined)
+            await sleep(900)
+          }
+          await this.browser.fillField(`id:artist-ac-main_performer-${i}`, performers[i]!).catch(() => undefined)
+          await sleep(250)
         }
-        if (!(await this.clickNext('authors'))) {
-          return this.fail('tracks', '«Далее» на «Фонограммах» не сработала даже после заполнения даты, ISRC/каталога и исполнителя.')
-        }
+        notes.push(`Исполнители: ${performers.join(', ')}`)
+
+        await this.browser.click('Сохранить').catch(() => undefined)
+        await sleep(1500)
+        if (!(await this.clickNext('authors'))) return this.fail('tracks', '«Далее» на «Фонограммах» не сработала после сохранения трека.')
         continue
       }
 
