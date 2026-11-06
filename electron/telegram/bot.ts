@@ -25,25 +25,27 @@ export interface BotReleaseResult {
   text: string
 }
 
-type Field = 'title' | 'artist' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'lyrics' | 'audio' | 'cover' | 'confirm'
+type Field = 'title' | 'artist' | 'authors' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'lyrics' | 'audio' | 'cover' | 'confirm'
 
 interface ChatState {
   field: Field
-  data: Partial<BotReleaseSpec> & { author?: string; description?: string; lyrics?: string; audioTitle?: string; coverTitle?: string; chatId?: number; username?: string }
+  data: Partial<BotReleaseSpec> & { author?: string; authors?: string; description?: string; lyrics?: string; audioTitle?: string; coverTitle?: string; chatId?: number; username?: string }
 }
 
 const QUESTIONS: Record<Field, string> = {
-  title: '1/9. Как называется релиз? (например: Open my eyes)',
-  artist: '2/9. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, автор — этот же исполнитель, доля 100%.',
-  genres: '3/9. Жанры через запятую (например: Rap, Alternative Rap).',
-  description: '4/9. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
+  title: '1/10. Как называется релиз? (например: Open my eyes)',
+  artist: '2/10. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, доля контролируется вами.',
+  authors:
+    '3/10. Авторы слов и музыки через запятую — в том же порядке, как их добавить в кабинет.\nНапример: smutmuv, badluckclub, ELLIWAY, HUNGER BUCKS\nЕсли автор один и это исполнитель — отправьте «-».',
+  genres: '4/10. Жанры через запятую (например: Rap, Alternative Rap).',
+  description: '5/10. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
   releaseDate:
-    '5/9. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
-  explicit: '6/9. В треке есть ненормативная лексика (мат)? Ответьте «да» или «нет».',
+    '6/10. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
+  explicit: '7/10. В треке есть ненормативная лексика (мат)? Ответьте «да» или «нет».',
   lyrics:
-    '7/9. Пришлите текст песни.\nЕсли мата нет — текст обязателен. Если мат есть — можно пропустить: отправьте «-».',
-  audio: '8/9. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
-  cover: '9/9. Пришлите обложку PNG или JPG, минимум 1500×1500 px (1:1, без логотипов и ссылок).',
+    '8/10. Пришлите текст песни.\nЕсли мата нет — текст обязателен. Если мат есть — можно пропустить: отправьте «-».',
+  audio: '9/10. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
+  cover: '10/10. Пришлите обложку PNG или JPG, минимум 1500×1500 px (1:1, без логотипов и ссылок).',
   confirm: 'Проверьте данные и отправьте «да» — отправлю заявку в приложение Broma 16 Assistant на проверку. «нет» — отменить.',
 }
 
@@ -59,6 +61,7 @@ export interface BotSubmission {
   releaseDate: string
   explicit: boolean
   author: string
+  authors: string
   description: string
   lyrics: string
   audioPath: string
@@ -209,7 +212,16 @@ export class TelegramBot {
       if (!text) return void this.say(chatId, 'Нужно имя исполнителя текстом.')
       data.artist = text.slice(0, 80)
       data.label = 'Music 959'
-      data.author = `${data.artist}, 100`
+      return next('authors')
+    }
+
+    if (state.field === 'authors') {
+      const list = !text || text === '-'
+        ? [data.artist!]
+        : text.split(',').map((a) => a.trim()).filter(Boolean).slice(0, 8)
+      if (!list.length) return void this.say(chatId, 'Пришлите хотя бы одного автора.')
+      data.authors = list.join(', ')
+      data.author = list[0]
       return next('genres')
     }
 
@@ -333,7 +345,8 @@ export class TelegramBot {
         genres: data.genres!,
         releaseDate: data.releaseDate!,
         explicit: Boolean(data.explicit),
-        author: data.author ?? `${data.artist}, 100`,
+        author: data.author ?? data.artist!,
+        authors: data.authors ?? data.artist!,
         description: data.description ?? '',
         lyrics: data.lyrics ?? '',
         audioPath: data.audioPath!,

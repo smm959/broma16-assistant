@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS tg_submissions (
   release_date TEXT,
   explicit INTEGER NOT NULL DEFAULT 0,
   author TEXT,
+  authors TEXT,
   description TEXT,
   lyrics TEXT,
   audio_path TEXT NOT NULL,

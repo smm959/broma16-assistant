@@ -1088,6 +1088,45 @@ export class BrowserAutomation {
     }
   }
 
+  /** Заполнить поле, которое ищется по подписи (например, «Доля автора #2»). */
+  async fillByLabel(label: string, value: string): Promise<{ ok: boolean; note: string }> {
+    const win = this.ensureWindow(false)
+    await this.ensurePage(win)
+    await this.waitReady(win)
+    const found = await this.ev(
+      win,
+      `(() => {
+        const label = ${JSON.stringify(label)}
+        const nodes = [...document.querySelectorAll('label,div,span')].filter((e) => (e.innerText || '').trim().startsWith(label))
+        for (const n of nodes) {
+          const holder = n.closest('div') || n.parentElement
+          const input = holder && holder.querySelector('input,textarea')
+          if (input) {
+            input.id = input.id || '__wiz_field'
+            input.setAttribute('data-wiz', '1')
+            input.focus()
+            input.select && input.select()
+            return true
+          }
+        }
+        return false
+      })()`,
+      true,
+    )
+    if (!found) return { ok: false, note: `Поле «${label}» не найдено` }
+    try {
+      const dbg = win.webContents.debugger
+      if (!dbg.isAttached()) dbg.attach('1.3')
+      await dbg.sendCommand('Input.insertText', { text: value })
+      await this.ev(win, `(() => { const el = document.querySelector('[data-wiz="1"]'); el && el.blur(); return true })()`, true)
+      const after = (await this.ev(win, `(() => { const el = document.querySelector('[data-wiz="1"]'); return el ? el.value : '' })()`, true)) as string
+      await this.ev(win, `(() => { const el = document.querySelector('[data-wiz="1"]'); el && el.removeAttribute('data-wiz'); return true })()`, true)
+      return { ok: String(after) === String(value), note: `«${label}» = ${after}` }
+    } catch (e) {
+      return { ok: false, note: String(e).slice(0, 120) }
+    }
+  }
+
   /** Ввод в rich-text редактор (Draft.js contenteditable) — например, текст песни. */
   async typeRichText(text: string): Promise<{ ok: boolean; note: string }> {
     const win = this.ensureWindow(false)

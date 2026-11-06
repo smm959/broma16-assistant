@@ -10,6 +10,7 @@ import type { BrowserAutomation } from './automation.js'
 export interface WizardSpec {
   title: string
   artist: string
+  authors?: string[]
   label: string
   type?: string
   genres: string[]
@@ -223,14 +224,26 @@ export class ReleaseWizard {
       }
 
       if (step === 'authors') {
-        await this.fillAuthor(spec.artist)
-        // Роль и «доля контролируется мной» — без них шаг не сохраняется.
-        await this.browser.chooseOption('ph:Роль автора #1', 'CA - Автор слов и музыки').catch(() => undefined)
-        await this.browser.fillField('id:controlled_by_submitter_0', 'true').catch(() => undefined)
-        await sleep(500)
+        const authors = (spec.authors?.length ? spec.authors : [spec.artist]).map((a) => String(a).trim()).filter(Boolean).slice(0, 8)
+        const base = Math.floor(100 / authors.length)
+        const shares = authors.map((_, i) => (i === 0 ? 100 - base * (authors.length - 1) : base))
+        for (let i = 0; i < authors.length; i++) {
+          const n = i + 1
+          if (i > 0) {
+            await this.browser.click('Добавить автора')
+            await sleep(900)
+          }
+          await this.fill(`ph:Автор #${n}`, authors[i]!)
+          await this.browser.chooseOption(`ph:Роль автора #${n}`, 'CA - Автор слов и музыки').catch(() => undefined)
+          await this.browser.fillByLabel(`Доля автора #${n}`, String(shares[i])).catch(() => undefined)
+          if (i === 0) await this.browser.fillField('id:controlled_by_submitter_0', 'true').catch(() => undefined)
+          await sleep(300)
+        }
+        notes.push(`Авторы: ${authors.join(', ')} (${shares.join('/')})`)
+        await sleep(400)
         await this.browser.click('Сохранить')
         await sleep(1200)
-        if (!(await this.clickNext('lyrics'))) return this.fail('authors', '«Далее» на «Авторах» не сработала. Проверь автора, роль и галочку «доля контролируется мной».')
+        if (!(await this.clickNext('lyrics'))) return this.fail('authors', '«Далее» на «Авторах» не сработала. Проверь авторов, роли и доли.')
         continue
       }
 

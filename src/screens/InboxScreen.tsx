@@ -211,8 +211,8 @@ export default function InboxScreen() {
                   ) : null}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '8px 14px', marginTop: 20, fontSize: 13 }}>
-                    <span style={{ color: 'var(--muted)' }}>Автор и доля</span>
-                    <span>{detail.author ?? '—'}</span>
+                    <span style={{ color: 'var(--muted)' }}>Авторы</span>
+                    <span>{detail.authors || detail.author || '—'}</span>
                     <span style={{ color: 'var(--muted)' }}>Отправитель</span>
                     <span>{detail.username || `chat ${detail.chatId}`}</span>
                     <span style={{ color: 'var(--muted)' }}>Создана</span>
