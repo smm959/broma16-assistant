@@ -164,10 +164,16 @@ export class TelegramBot {
     this.deps.db.run(`DELETE FROM kv WHERE key = ?`, KEY(chatId))
   }
 
-  private async say(chatId: number, text: string): Promise<void> {
-    await this.api('sendMessage', { chat_id: chatId, text, disable_web_page_preview: true }).catch((e) =>
-      this.deps.log(`[telegram] send: ${String(e).slice(0, 120)}`),
-    )
+  private async say(chatId: number, text: string, withMenu = false): Promise<void> {
+    const payload: Record<string, unknown> = { chat_id: chatId, text, disable_web_page_preview: true }
+    if (withMenu) {
+      payload.reply_markup = {
+        keyboard: [[{ text: '🆕 Новая заявка' }, { text: '♻️ Сбросить' }]],
+        resize_keyboard: true,
+        is_persistent: true,
+      }
+    }
+    await this.api('sendMessage', payload).catch((e) => this.deps.log(`[telegram] send: ${String(e).slice(0, 120)}`))
   }
 
   private async handle(msg: any): Promise<void> {
@@ -177,15 +183,20 @@ export class TelegramBot {
     const kind = msg.document ? 'document' : msg.audio ? 'audio' : msg.photo ? 'photo' : 'text'
     this.deps.log(`[telegram] ${chatId}: ${kind}`)
 
-    if (/^\/(start|new)$/i.test(text)) {
+    if (/^\/(start|new)$/i.test(text) || /новая\s+заявка/i.test(text)) {
       this.reset(chatId)
       this.saveState(chatId, { field: 'title', data: {} })
-      await this.say(chatId, 'Привет! Соберу релиз в Broma 16.\n\n' + QUESTIONS.title)
+      await this.say(
+        chatId,
+        'Привет! Соберу релиз в Broma 16.\nКнопки внизу: «🆕 Новая заявка» — начать заново, «♻️ Сбросить» — отменить текущую.',
+        true,
+      )
+      await this.say(chatId, QUESTIONS.title)
       return
     }
-    if (/^\/(cancel|stop)$/i.test(text)) {
+    if (/^\/(cancel|stop)$/i.test(text) || /сброс/i.test(text)) {
       this.reset(chatId)
-      await this.say(chatId, 'Отменил. /start — начать заново.')
+      await this.say(chatId, 'Сбросил. Нажмите «🆕 Новая заявка», когда будете готовы.', true)
       return
     }
     if (/^\/status$/i.test(text)) {
@@ -335,7 +346,7 @@ export class TelegramBot {
     if (state.field === 'confirm') {
       if (/^(нет|no|отмена)$/i.test(text)) {
         this.reset(chatId)
-        return void this.say(chatId, 'Отменил. /start — заново.')
+        return void this.say(chatId, 'Отменил. «🆕 Новая заявка» — начать заново.', true)
       }
       if (!/^(да|yes|ок|ok)$/i.test(text)) return void this.say(chatId, 'Отправьте «да» для сборки или «нет» для отмены.')
       const submission = {
@@ -370,7 +381,7 @@ export class TelegramBot {
             coverPath: submission.coverPath,
           }).catch((e) => ({ ok: false, text: String(e).slice(0, 300) }))
       this.reset(chatId)
-      await this.say(chatId, res.text)
+      await this.say(chatId, res.text, true)
       return
     }
   }
