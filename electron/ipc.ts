@@ -99,10 +99,12 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
       coverPath: sub.coverPath,
       from: 'release',
     })
+    const resultText = res.ok ? `Обзор: ${res.url}` : `Ошибка на шаге ${res.failure?.step}: ${res.failure?.reason}`
     db.run(
-      `UPDATE tg_submissions SET status = 'approved', decided_at = ?, result = ? WHERE id = ?`,
-      Date.now(),
-      res.ok ? `Обзор: ${res.url}` : `Ошибка на шаге ${res.failure?.step}: ${res.failure?.reason}`,
+      `UPDATE tg_submissions SET status = ?, decided_at = ?, result = ? WHERE id = ?`,
+      res.ok ? 'approved' : 'pending',
+      res.ok ? Date.now() : null,
+      resultText,
       id,
     )
     emitSubmissions()

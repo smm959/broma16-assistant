@@ -47,6 +47,10 @@ export default function InboxScreen() {
       setNote({ text: res.text, tone: res.ok ? 'success' : 'error' })
       app.toast(res.ok ? 'Релиз собран до «Обзора»' : 'Не удалось собрать релиз', res.ok ? 'success' : 'error')
       await load()
+    } catch (e) {
+      const text = `Ошибка: ${String(e).slice(0, 300)}`
+      setNote({ text, tone: 'error' })
+      app.toast('Ошибка при сборке релиза', 'error')
     } finally {
       setBusy(null)
     }
@@ -59,6 +63,8 @@ export default function InboxScreen() {
       setNote({ text: 'Заявка отклонена.', tone: 'error' })
       app.toast('Заявка отклонена')
       await load()
+    } catch (e) {
+      setNote({ text: `Ошибка: ${String(e).slice(0, 300)}`, tone: 'error' })
     } finally {
       setBusy(null)
     }

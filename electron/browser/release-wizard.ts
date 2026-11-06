@@ -40,7 +40,7 @@ export interface WizardResult {
 }
 
 const STEP_URL: Record<WizardStep, RegExp> = {
-  release: /\/release\/\d+\/?$/,
+  release: /\/release\/(?:create|\d+)\/?$/,
   files: /\/release\/\d+\/file/,
   tracks: /\/release\/\d+\/tracks/,
   authors: /\/release\/\d+\/authors/,
@@ -90,8 +90,15 @@ export class ReleaseWizard {
     return res.ok
   }
 
-  private async clickNext(expect: WizardStep, timeoutMs = 20_000): Promise<boolean> {
-    for (let attempt = 0; attempt < 2; attempt++) {
+  private async clickNext(expect: WizardStep, timeoutMs = 24_000): Promise<boolean> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // Ждём, пока кнопка станет активной (после загрузки файла она бывает disabled).
+      const btnStart = Date.now()
+      while (Date.now() - btnStart < timeoutMs / 2) {
+        const info = await this.browser.describeTarget('Далее').catch(() => null)
+        if (info?.found && !info.disabled) break
+        await sleep(500)
+      }
       await this.browser.click('Далее')
       const started = Date.now()
       while (Date.now() - started < timeoutMs / 2) {
@@ -170,7 +177,12 @@ export class ReleaseWizard {
         const inputs = await this.browser.listFileInputs()
         const idx = inputs.findIndex((x) => /wav|flac|audio/i.test(x.accept ?? '')) ?? 0
         const up = await this.browser.uploadFiles(idx < 0 ? 0 : idx, files.map((f) => f.path))
-        if (!up.ok) return this.fail('files', `Не удалось прикрепить аудио: ${up.note}`)
+        if (!up.ok) {
+          // Сайт часто забирает файл в свою модель и очищает input — проверяем по странице.
+          const page = await this.browser.read({ maxChars: 5000 })
+          const seen = files.some((f) => page.text.includes(f.filename.split('/').pop() ?? ''))
+          if (!seen) return this.fail('files', `Не удалось прикрепить аудио: ${up.note}`)
+        }
         notes.push(`Аудио: ${files.map((f) => f.filename).join(', ')}`)
         if (!(await this.clickNext('tracks'))) return this.fail('files', 'После загрузки аудио «Далее» не сработала.')
         continue
@@ -178,7 +190,12 @@ export class ReleaseWizard {
 
       if (step === 'tracks') {
         const relId = /\/release\/(\d+)/.exec((await this.state()).url)?.[1]
-        if (relId) await this.syncTrackViaApi(relId, spec)
+        if (relId) {
+          await this.syncTrackViaApi(relId, spec)
+          // После записи через API форма должна перечитаться, иначе «Далее» остаётся disabled.
+          await this.browser.open(`https://rod.broma16.ru/release/${relId}/tracks`).catch(() => undefined)
+          await sleep(1200)
+        }
         const f = await this.fields()
         const has = (k: string) => f.some((x) => x.key === k)
         if (has('ph:Название')) await this.fill('ph:Название', spec.title)
@@ -238,7 +255,10 @@ export class ReleaseWizard {
           if (!files.length) return this.fail('cover', 'Нет обложки (ни вложения, ни пути не переданы).')
           const idx = inputs.findIndex((x) => /jpg|jpeg|png|image/i.test(x.accept ?? '')) ?? 0
           const up = await this.browser.uploadFiles(idx < 0 ? 0 : idx, files.map((f) => f.path))
-          if (!up.ok) return this.fail('cover', `Не удалось прикрепить обложку: ${up.note}`)
+          if (!up.ok) {
+            const after = await this.browser.read({ maxChars: 5000 })
+            if (!/Удалить/.test(after.text)) return this.fail('cover', `Не удалось прикрепить обложку: ${up.note}`)
+          }
           notes.push(`Обложка: ${files[0]!.filename}`)
         } else {
           notes.push('Обложка уже загружена')
