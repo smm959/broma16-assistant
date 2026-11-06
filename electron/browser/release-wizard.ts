@@ -135,6 +135,14 @@ export class ReleaseWizard {
 
   async run(spec: WizardSpec): Promise<WizardResult> {
     const notes: string[] = []
+    if (spec.from === 'release') {
+      // «С нуля»: идём через дашборд и кнопку «Добавить релиз» — прямой /release/create даёт 404.
+      const accountId = (await this.browser.evaluateRaw('localStorage.getItem("accountId") || "870645"').catch(() => '870645')) || '870645'
+      await this.browser.open(`https://rod.broma16.ru/accounts/${accountId}/dashboard`).catch(() => undefined)
+      await sleep(1500)
+      await this.browser.click('Добавить релиз').catch(() => undefined)
+      await sleep(3000)
+    }
     let current = await this.stepOf()
     if (!current) {
       // Визард можно звать откуда угодно: сами открываем создание релиза.
