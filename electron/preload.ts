@@ -103,6 +103,7 @@ const api = {
     open: (url?: string) => invoke('browser:open', url),
     read: () => invoke('browser:read'),
     click: (target: string) => invoke('browser:click', target),
+    releaseWizard: (input: any) => invoke('release:wizard', input),
     formFields: () => invoke('browser:form-fields'),
     fillField: (target: any, value: string) => invoke('browser:fill-field', target, value),
     chooseOption: (target: any, option: string) => invoke('browser:choose-option', target, option),

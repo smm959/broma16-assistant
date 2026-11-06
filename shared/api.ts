@@ -121,6 +121,7 @@ export interface Api {
     open(url?: string): Promise<{ url: string; title: string }>
     read(): Promise<{ url: string; title: string; text: string; loggedIn: boolean; auth: 'in' | 'out' | 'unknown'; links: { text: string; href: string }[] }>
     click(target: string): Promise<{ ok: boolean; note: string }>
+    releaseWizard(input: { conversationId: string; spec: any }): Promise<any>
     formFields(): Promise<any[]>
     fillField(target: string | number, value: string): Promise<any>
     chooseOption(target: string | number, option: string): Promise<any>

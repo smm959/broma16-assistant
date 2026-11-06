@@ -34,8 +34,8 @@ const FORM_FIELDS_JS = String.raw`(() => {
     const placeholder = el.getAttribute('placeholder') || ''
     let key = ''
     if (placeholder) key = 'ph:' + placeholder
+    else if (el.id && !/^ti-/.test(el.id) && el.id !== 'scrollable-layout') key = 'id:' + el.id
     else if (wrap && wrap.id) key = 'wrap:' + wrap.id
-    else if (el.id && !/^ti-/.test(el.id)) key = 'id:' + el.id
     else key = 'idx:' + index
     let selector = ''
     if (el.id) selector = '#' + el.id
@@ -451,6 +451,14 @@ export class BrowserAutomation {
       hasOtpField: Boolean(data.hasOtpField),
       links: data.links ?? [],
     }
+  }
+
+  /** Выполнить произвольный JS на текущей странице (для сценарных шагов). */
+  async evaluateRaw(script: string): Promise<any> {
+    const win = this.ensureWindow(false)
+    await this.ensurePage(win)
+    await this.waitReady(win)
+    return this.ev(win, script, true)
   }
 
   /** Что за элемент будет нажат: текст, тег, disabled. Нужно для защиты финальной кнопки. */

@@ -7,6 +7,7 @@ import { PROVIDERS } from './llm/presets.js'
 import { EMAIL_PRESETS } from './email/index.js'
 import { LOGIN_URL } from './browser/automation.js'
 import { autoLogin } from './browser/login.js'
+import { ReleaseWizard } from './browser/release-wizard.js'
 import { secrets } from './security/secrets.js'
 import { createHash } from 'node:crypto'
 
@@ -345,6 +346,22 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
   handle('browser:open', (url?: string) => browser.open(url))
   handle('browser:read', () => browser.read())
   handle('browser:click', (target: string) => browser.click(target))
+  handle('release:wizard', async (input: any) => {
+    const conversationId = String(input?.conversationId ?? '')
+    const rows = db.all<any>(
+      `SELECT a.id, a.filename, a.path, a.kind FROM chat_attachments a JOIN messages m ON m.id = a.message_id WHERE m.conversation_id = ?`,
+      conversationId,
+    )
+    const map = new Map<string, { id: string; filename: string; path: string; kind: string }>()
+    for (const r of rows) if (r.path) map.set(r.id, r)
+    const wizard = new ReleaseWizard(browser, (ids) =>
+      ids
+        .map((id) => map.get(id))
+        .filter((a): a is NonNullable<typeof a> => Boolean(a?.path))
+        .map((a) => ({ id: a.id, path: a.path, filename: a.filename })),
+    )
+    return wizard.run(input.spec)
+  })
   handle('browser:form-fields', () => browser.formFields())
   handle('browser:fill-field', (target: any, value: string) => browser.fillField(target, value))
   handle('browser:choose-option', (target: any, option: string) => browser.chooseOption(target, option))

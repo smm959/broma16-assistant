@@ -7,6 +7,7 @@ import type { SourceRef, AttachmentRef } from '../../shared/types.js'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, existsSync } from 'node:fs'
 import { autoLogin } from '../browser/login.js'
+import { ReleaseWizard, type WizardStep } from '../browser/release-wizard.js'
 import type { VisionService } from '../llm/vision.js'
 
 export type Risk = 'safe' | 'confirm'
@@ -586,6 +587,69 @@ export const TOOLS: ToolDef[] = [
     run: async (args, ctx) => {
       const r = await ctx.browser.scrollBy(Number(args.delta_y) || 600)
       return { content: r.note }
+    },
+  },
+  {
+    name: 'release_wizard',
+    description:
+      'Детерминированно провести визард релиза Broma 16: Релиз → Файлы → Фонограммы → Авторы → Лирика → Обложка → Дистрибуция → Обзор. Заполняет по карте шагов, прикрепляет аудио/обложку из вложений диалога, НЕ нажимает «Отправить на модерацию». Возвращает шаг, URL и точную причину, если шаг не прошёл.',
+    risk: 'safe',
+    parameters: obj(
+      {
+        title: str('Название релиза'),
+        artist: str('Исполнитель'),
+        label: str('Лейбл'),
+        genres: { type: 'array', items: { type: 'string' }, description: 'Жанры, например ["Rap","Alternative Rap"]' },
+        type: str('Тип релиза (Сингл/Альбом/EP)'),
+        release_date: str('Дата релиза ДД.ММ.ГГГГ'),
+        creation_date: str('Дата создания (по умолчанию сегодня)'),
+        explicit: { type: 'boolean', description: 'Есть ненормативная лексика' },
+        lyrics: str('Текст лирики (необязательно)'),
+        cover_id: str('id вложения-обложки'),
+        audio_ids: { type: 'array', items: { type: 'string' }, description: 'id вложений-аудио' },
+        from: str('С какого шага начать: release|files|tracks|authors|lyrics|cover|distribution'),
+      },
+      ['title', 'artist', 'label', 'genres'],
+    ),
+    run: async (args, ctx) => {
+      const wizard = new ReleaseWizard(ctx.browser, (ids) =>
+        ids
+          .map((id) => ctx.attachments.get(id))
+          .filter((a): a is NonNullable<typeof a> => Boolean(a?.path))
+          .map((a) => ({ id: a.id, path: a.path!, filename: a.filename })),
+      )
+      const res = await wizard.run({
+        title: String(args.title),
+        artist: String(args.artist),
+        label: String(args.label),
+        genres: Array.isArray(args.genres) ? args.genres.map(String) : [],
+        type: args.type ? String(args.type) : 'Сингл',
+        releaseDate: args.release_date ? String(args.release_date) : undefined,
+        creationDate: args.creation_date ? String(args.creation_date) : undefined,
+        explicit: Boolean(args.explicit),
+        lyrics: args.lyrics ? String(args.lyrics) : undefined,
+        coverId: args.cover_id ? String(args.cover_id) : undefined,
+        audioIds: Array.isArray(args.audio_ids) ? args.audio_ids.map(String) : [],
+        from: args.from ? (String(args.from) as WizardStep) : undefined,
+      })
+      if (!res.ok) {
+        const f = (res.failure?.fields ?? []) as any[]
+        return {
+          content: [
+            `Визард остановился на шаге «${res.failure?.step}». Причина: ${res.failure?.reason}`,
+            res.failure?.text ? `Текст страницы: ${res.failure.text}` : '',
+            f.length
+              ? `Поля:\n${f.map((x) => `- ${x.key ?? x.placeholder ?? x.tag} = «${String(x.value).slice(0, 30)}»${x.type === 'checkbox' ? (x.checked ? ' CHECKED' : ' unchecked') : ''}`).join('\n')}`
+              : '',
+            'Дальше можно продолжить вручную по этому же шагу (account_form_fields → account_fill) или сказать, какой пункт не даёт пройти.',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        }
+      }
+      return {
+        content: `Визард доведён до шага «${res.step}» (${res.url}). Останавливаюсь перед «Отправить на модерацию».\nШаги: ${res.notes.join(' → ')}`,
+      }
     },
   },
   {
