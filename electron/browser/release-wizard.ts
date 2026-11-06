@@ -22,6 +22,9 @@ export interface WizardSpec {
   lyrics?: string
   coverId?: string
   audioIds?: string[]
+  /** Прямые пути к файлам (например, скачанные Telegram-ботом). */
+  audioPaths?: string[]
+  coverPath?: string
   stores?: 'all' | string[]
   from?: WizardStep
 }
@@ -160,8 +163,10 @@ export class ReleaseWizard {
       }
 
       if (step === 'files') {
-        const files = this.resolveFiles(spec.audioIds ?? [])
-        if (!files.length) return this.fail('files', 'Нет аудиофайла в диалоге (audioIds пусты).')
+        const files = spec.audioPaths?.length
+          ? spec.audioPaths.map((p) => ({ id: p, path: p, filename: p.split('/').pop() ?? 'audio.wav' }))
+          : this.resolveFiles(spec.audioIds ?? [])
+        if (!files.length) return this.fail('files', 'Нет аудиофайла (ни вложения, ни пути не переданы).')
         const inputs = await this.browser.listFileInputs()
         const idx = inputs.findIndex((x) => /wav|flac|audio/i.test(x.accept ?? '')) ?? 0
         const up = await this.browser.uploadFiles(idx < 0 ? 0 : idx, files.map((f) => f.path))
@@ -227,8 +232,10 @@ export class ReleaseWizard {
         const page = await this.browser.read({ maxChars: 3000 })
         const alreadyUploaded = inputs.length === 0 || /Удалить/.test(page.text)
         if (!alreadyUploaded) {
-          const files = this.resolveFiles(spec.coverId ? [spec.coverId] : [])
-          if (!files.length) return this.fail('cover', 'Нет обложки в диалоге (coverId пуст).')
+          const files = spec.coverPath
+            ? [{ id: spec.coverPath, path: spec.coverPath, filename: spec.coverPath.split('/').pop() ?? 'cover.png' }]
+            : this.resolveFiles(spec.coverId ? [spec.coverId] : [])
+          if (!files.length) return this.fail('cover', 'Нет обложки (ни вложения, ни пути не переданы).')
           const idx = inputs.findIndex((x) => /jpg|jpeg|png|image/i.test(x.accept ?? '')) ?? 0
           const up = await this.browser.uploadFiles(idx < 0 ? 0 : idx, files.map((f) => f.path))
           if (!up.ok) return this.fail('cover', `Не удалось прикрепить обложку: ${up.note}`)

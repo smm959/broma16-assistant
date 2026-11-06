@@ -7,6 +7,9 @@ import { initScheduler } from './scheduler.js'
 import { LOGIN_URL } from './browser/automation.js'
 import { autoLogin } from './browser/login.js'
 import { secrets } from './security/secrets.js'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { TelegramBot } from './telegram/bot.js'
+import { ReleaseWizard } from './browser/release-wizard.js'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -180,6 +183,7 @@ if (!gotLock) {
       mainWindow?.focus()
     })
     void autoOpenCabinet(services)
+    startTelegramBot(services)
 
     // Разрешаем только нужные разрешения (микрофон/камера не требуются)
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
@@ -189,6 +193,59 @@ if (!gotLock) {
       else mainWindow?.show()
     })
   }
+}
+
+/** Telegram-бот: токен из TELEGRAM_BOT_TOKEN или userData/telegram-token.txt. */
+function startTelegramBot(svc: Services) {
+  const tokenPath = join(app.getPath('userData'), 'telegram-token.txt')
+  let token = process.env.TELEGRAM_BOT_TOKEN ?? ''
+  if (!token) {
+    try {
+      token = readFileSync(tokenPath, 'utf8').trim()
+    } catch {
+      /* нет токена — бот не запускаем */
+    }
+  }
+  if (!token) return
+
+  const bot = new TelegramBot(token, {
+    db: svc.db as any,
+    dir: app.getPath('userData'),
+    log: (m) => console.log(m),
+    runRelease: async (spec) => {
+      const st = svc.settings()
+      await autoLogin(
+        { browser: svc.browser, email: svc.email, credentials: { login: st.accountLogin ?? '', password: secrets().get('broma:password') } },
+        { url: LOGIN_URL, show: false },
+      ).catch(() => undefined)
+      const page = await svc.browser.open('https://rod.broma16.ru/release/create')
+      const wizard = new ReleaseWizard(svc.browser, () => [])
+      const res = await wizard.run({
+        title: spec.title,
+        artist: spec.artist,
+        label: spec.label,
+        genres: spec.genres,
+        type: 'Сингл',
+        releaseDate: spec.releaseDate,
+        explicit: spec.explicit,
+        audioPaths: [spec.audioPath],
+        coverPath: spec.coverPath,
+        from: 'release',
+      })
+      if (!res.ok) {
+        return {
+          ok: false,
+          text: `Остановился на шаге «${res.failure?.step}»: ${res.failure?.reason}\nЧерновик сохранён, можно поправить вручную.`,
+        }
+      }
+      return {
+        ok: true,
+        text: `Релиз собран и стоит на «Обзоре»: ${res.url}\nПроверьте и нажмите «Отправить на модерацию» сами — я её не трогаю.\nФайл: ${spec.audioPath.split('/').pop()}\nОбложка: ${spec.coverPath.split('/').pop()}\nДата: ${spec.releaseDate}`,
+      }
+    },
+  })
+  void bot.start()
+  app.on('before-quit', () => bot.stop())
 }
 
 /** Если включено «Открывать кабинет при запуске» — заходим в аккаунт заранее. */
