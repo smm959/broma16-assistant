@@ -42,7 +42,7 @@ const QUESTIONS: Record<Field, string> = {
   explicit: '6/9. В треке есть ненормативная лексика? Ответьте «да» или «нет».',
   author:
     '7/9. Автор слов и музыки?\nОтправьте имя и долю через запятую (например: ELLIWAY, 100).\nЕсли автор — исполнитель и доля 100%, отправьте «-».',
-  audio: '8/9. Пришлите WAV-файл.\nТребования: WAV, 44100 Гц (16/24 бита; 32-bit float тоже принимается).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
+  audio: '8/9. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
   cover: '9/9. Пришлите обложку PNG 3000×3000 px (1:1, без логотипов и ссылок).',
   confirm: 'Проверьте данные и отправьте «да», чтобы я собрал релиз в кабинете. «нет» — отменить.',
 }
@@ -266,7 +266,7 @@ export class TelegramBot {
       }
       if (!doc) return void this.say(chatId, 'Пришлите WAV файлом/аудио или ссылкой на файл.')
       const name = String(doc.file_name ?? (doc.mime_type === 'audio/wav' ? 'audio.wav' : 'audio'))
-      if (!/\.wav$/i.test(name)) return void this.say(chatId, 'Нужен именно WAV-файл (16 или 24 бит, 44100 Гц).')
+      if (!/\.wav$/i.test(name)) return void this.say(chatId, 'Нужен именно WAV-файл (44100/48000 Гц, 16/24/32 бита).')
       if (Number(doc.file_size ?? 0) > 20 * 1024 * 1024) {
         return void this.say(
           chatId,
@@ -372,7 +372,7 @@ export class TelegramBot {
 export async function checkWav(path: string): Promise<{ ok: boolean; reason: string }> {
   const buf = await readFile(path)
   if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
-    return { ok: false, reason: 'Файл не похож на WAV. Пришлите WAV 44100 Гц (16/24/32 бита).' }
+    return { ok: false, reason: 'Файл не похож на WAV. Пришлите WAV 44100/48000 Гц (16/24/32 бита).' }
   }
   let pos = 12
   while (pos + 8 <= buf.length) {
@@ -382,7 +382,7 @@ export async function checkWav(path: string): Promise<{ ok: boolean; reason: str
       const channels = buf.readUInt16LE(pos + 10)
       const rate = buf.readUInt32LE(pos + 12)
       const bits = buf.readUInt16LE(pos + 22)
-      if (rate !== 44100) return { ok: false, reason: `Частота ${rate} Гц — нужна 44100 Гц.` }
+      if (![44100, 48000].includes(rate)) return { ok: false, reason: `Частота ${rate} Гц — нужны 44100 или 48000 Гц.` }
       // 32-bit float мастера тоже принимаем: портал их берёт.
       if (![16, 24, 32].includes(bits)) return { ok: false, reason: `Битность ${bits} — нужны 16, 24 или 32 бита.` }
       if (channels < 1) return { ok: false, reason: 'В файле нет аудиоканалов.' }
@@ -390,7 +390,7 @@ export async function checkWav(path: string): Promise<{ ok: boolean; reason: str
     }
     pos += 8 + size + (size % 2)
   }
-  return { ok: false, reason: 'Не нашёл параметры WAV. Пришлите WAV 16/24 бит, 44100 Гц.' }
+  return { ok: false, reason: 'Не нашёл параметры WAV. Пришлите WAV 44100/48000 Гц (16/24/32 бита).' }
 }
 
 export async function checkPng(path: string): Promise<{ ok: boolean; reason: string }> {
