@@ -25,7 +25,7 @@ export interface BotReleaseResult {
   text: string
 }
 
-type Field = 'title' | 'artist' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'audio' | 'cover' | 'confirm'
+type Field = 'title' | 'artist' | 'genres' | 'description' | 'releaseDate' | 'audio' | 'cover' | 'confirm'
 
 interface ChatState {
   field: Field
@@ -33,15 +33,14 @@ interface ChatState {
 }
 
 const QUESTIONS: Record<Field, string> = {
-  title: '1/8. Как называется релиз? (например: Open my eyes)',
-  artist: '2/8. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, автор — этот же исполнитель, доля 100%.',
-  genres: '3/8. Жанры через запятую (например: Rap, Alternative Rap).',
-  description: '4/8. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
+  title: '1/7. Как называется релиз? (например: Open my eyes)',
+  artist: '2/7. Кто исполнитель? (например: ELLIWAY)\nЛейбл — Music 959, автор — этот же исполнитель, доля 100%, explicit — да.',
+  genres: '3/7. Жанры через запятую (например: Rap, Alternative Rap).',
+  description: '4/7. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
   releaseDate:
-    '5/8. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
-  explicit: '6/8. В треке есть ненормативная лексика? Ответьте «да» или «нет».',
-  audio: '7/8. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
-  cover: '8/8. Пришлите обложку PNG или JPG, минимум 1500×1500 px (1:1, без логотипов и ссылок).',
+    '5/7. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
+  audio: '6/7. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
+  cover: '7/7. Пришлите обложку PNG или JPG, минимум 1500×1500 px (1:1, без логотипов и ссылок).',
   confirm: 'Проверьте данные и отправьте «да» — отправлю заявку в приложение Broma 16 Assistant на проверку. «нет» — отменить.',
 }
 
@@ -233,14 +232,8 @@ export class TelegramBot {
       const days = Math.ceil((date.getTime() - Date.now()) / 86_400_000)
       if (days < 7) return void this.say(chatId, `Сайт требует минимум 7 дней до релиза. Сейчас до даты ${days} дн. Пришлите другую.`)
       data.releaseDate = `${String(m[1]).padStart(2, '0')}.${String(m[2]).padStart(2, '0')}.${m[3]}`
-      return next('explicit')
-    }
-
-    if (state.field === 'explicit') {
-      if (!/^(да|yes|есть|1)$/i.test(text) && !/^(нет|no|0)$/i.test(text)) {
-        return void this.say(chatId, 'Ответьте «да» или «нет».')
-      }
-      data.explicit = /^(да|yes|есть|1)$/i.test(text)
+      // По умолчанию всегда explicit: если мата нет, сайт потребует текст песни.
+      data.explicit = true
       return next('audio')
     }
 
@@ -319,7 +312,7 @@ export class TelegramBot {
         label: data.label!,
         genres: data.genres!,
         releaseDate: data.releaseDate!,
-        explicit: Boolean(data.explicit),
+        explicit: true,
         author: data.author ?? `${data.artist}, 100`,
         description: data.description ?? '',
         audioPath: data.audioPath!,
