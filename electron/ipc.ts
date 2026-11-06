@@ -10,6 +10,7 @@ import { autoLogin } from './browser/login.js'
 import { ReleaseWizard } from './browser/release-wizard.js'
 import { secrets } from './security/secrets.js'
 import { createHash } from 'node:crypto'
+import { statSync } from 'node:fs'
 
 export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWindow | null) {
   const { db, kb, llm, email, agent, browser, files } = svc
@@ -80,39 +81,60 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
     const row = db.get<any>(`SELECT * FROM tg_submissions WHERE id = ?`, id)
     if (!row) return { ok: false, text: 'Заявка не найдена' }
     const sub = mapSubmission(row)
-    const st = svc.settings()
-    await autoLogin(
-      { browser, email, credentials: { login: st.accountLogin ?? '', password: secrets().get('broma:password') } },
-      { url: LOGIN_URL, show: false },
-    ).catch(() => undefined)
-    await browser.open('https://rod.broma16.ru/release/create')
-    const wizard = new ReleaseWizard(browser, () => [])
-    const res = await wizard.run({
-      title: sub.title,
-      artist: sub.artist,
-      label: sub.label,
-      genres: sub.genres,
-      type: 'Сингл',
-      releaseDate: sub.releaseDate ?? undefined,
-      explicit: sub.explicit,
-      audioPaths: [sub.audioPath],
-      coverPath: sub.coverPath,
-      from: 'release',
-    })
-    const resultText = res.ok ? `Обзор: ${res.url}` : `Ошибка на шаге ${res.failure?.step}: ${res.failure?.reason}`
+    const text = [
+      'Собери релиз из заявки (Telegram).',
+      `Название: ${sub.title}`,
+      `Исполнитель: ${sub.artist}`,
+      `Лейбл: ${sub.label || 'Music 959'}`,
+      `Жанры: ${sub.genres.join(', ')}`,
+      `Дата релиза: ${sub.releaseDate ?? 'не указана'}`,
+      'Ненормативная лексика: да',
+      `Автор и доля: ${sub.author ?? `${sub.artist}, 100`}`,
+      sub.description ? `Описание: ${sub.description}` : '',
+      '',
+      'Аудио и обложка — во вложениях. Прогони release_wizard до экрана «Обзор», кнопку «Отправить на модерацию» не нажимай.',
+    ]
+      .filter(Boolean)
+      .join('\n')
+
+    const attachments = []
+    try {
+      const audioStat = statSync(sub.audioPath)
+      attachments.push({
+        id: `att_tg_${createHash('sha1').update(sub.audioPath).digest('hex').slice(0, 10)}`,
+        filename: sub.audioName,
+        mimeType: 'audio/wav',
+        size: audioStat.size,
+        kind: 'audio' as const,
+        path: sub.audioPath,
+      })
+      const coverStat = statSync(sub.coverPath)
+      attachments.push({
+        id: `att_tg_${createHash('sha1').update(sub.coverPath).digest('hex').slice(0, 10)}`,
+        filename: sub.coverName,
+        mimeType: /\.png$/i.test(sub.coverName) ? 'image/png' : 'image/jpeg',
+        size: coverStat.size,
+        kind: 'image' as const,
+        path: sub.coverPath,
+      })
+    } catch {
+      return { ok: false, text: 'Файлы заявки не найдены на диске' }
+    }
+
+    const sent = await agent.sendUserMessage({ text, attachments })
+    try {
+      agent.renameConversation(sent.conversationId, `${sub.artist} — ${sub.title}`)
+    } catch {
+      /* не критично */
+    }
     db.run(
-      `UPDATE tg_submissions SET status = ?, decided_at = ?, result = ? WHERE id = ?`,
-      res.ok ? 'approved' : 'pending',
-      res.ok ? Date.now() : null,
-      resultText,
+      `UPDATE tg_submissions SET status = 'approved', decided_at = ?, result = ? WHERE id = ?`,
+      Date.now(),
+      `Передано в чат ${sent.conversationId}`,
       id,
     )
     emitSubmissions()
-    return {
-      ok: res.ok,
-      url: res.url,
-      text: res.ok ? `Готово: ${res.url}` : `Остановился на шаге «${res.failure?.step}»: ${res.failure?.reason}`,
-    }
+    return { ok: true, conversationId: sent.conversationId, text: 'Передал в новый чат — агент собирает релиз.' }
   })
 
   /* -------------------------------- bootstrap -------------------------------- */

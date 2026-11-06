@@ -144,7 +144,7 @@ export interface Api {
   submissions: {
     list(): Promise<TgSubmission[]>
     get(id: string): Promise<TgSubmission | null>
-    approve(id: string): Promise<{ ok: boolean; url?: string; text: string }>
+    approve(id: string): Promise<{ ok: boolean; url?: string; conversationId?: string; text: string }>
     reject(id: string): Promise<{ ok: boolean }>
     remove(id: string): Promise<{ ok: boolean }>
   }

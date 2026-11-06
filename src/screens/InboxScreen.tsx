@@ -45,8 +45,12 @@ export default function InboxScreen() {
     try {
       const res = await window.api.submissions.approve(sub.id)
       setNote({ text: res.text, tone: res.ok ? 'success' : 'error' })
-      app.toast(res.ok ? 'Релиз собран до «Обзора»' : 'Не удалось собрать релиз', res.ok ? 'success' : 'error')
+      app.toast(res.ok ? 'Заявка передана в чат' : 'Не удалось передать заявку', res.ok ? 'success' : 'error')
       await load()
+      if (res.ok && res.conversationId) {
+        app.setConversationId(res.conversationId)
+        app.setScreen('chat')
+      }
     } catch (e) {
       const text = `Ошибка: ${String(e).slice(0, 300)}`
       setNote({ text, tone: 'error' })
