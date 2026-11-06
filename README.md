@@ -1,6 +1,6 @@
 # Broma 16 Assistant
 
-![macOS build](https://img.shields.io/badge/macOS-DMG%20v1.6.4-black?logo=apple)
+![macOS build](https://img.shields.io/badge/macOS-DMG%20v1.6.5-black?logo=apple)
 ![Windows build](https://img.shields.io/badge/Windows-build%20help%20wanted-yellow)
 
 Персональный desktop-ассистент для работы с музыкальным дистрибьютором **Broma 16**: релизы, отчёты, выплаты, питчинг, Content ID, YouTube, тексты песен и поддержка — в одном окне, обычным языком.
@@ -10,7 +10,7 @@
 ![Подключение AI](docs/screenshots/01-connect.png)
 ![Чат с агентом](docs/screenshots/02-chat.png)
 
-**Что нового в 1.6.4:** точная дата релиза выставляется на шаге «Дистрибуция» (ввод даты + выбор в календаре), клики работают по кастомным радио/чекбоксам без role/button.
+**Что нового в 1.6.5:** агент помнит активный черновик (id/шаг/URL), видит состояние чекбоксов, вводит автокомплиты и даты «как человек» (доверенные события) и знает чек-лист шага «Фонограммы».
 
 ---
 

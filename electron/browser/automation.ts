@@ -54,6 +54,7 @@ const FORM_FIELDS_JS = String.raw`(() => {
       disabled: !!el.disabled,
       readOnly: !!el.readOnly,
       value: (el.value || '').toString().slice(0, 80),
+      checked: el.type === 'checkbox' || el.type === 'radio' ? Boolean(el.checked) : undefined,
       tokens,
       invalid,
       key,
@@ -924,6 +925,20 @@ export class BrowserAutomation {
       }
     }
 
+    // PrimeNG AutoComplete игнорирует синтетические события — вводим как человек.
+    const isAutocomplete = await this.ev(win, `!!(${FIELD_BY_INDEX(index)}).closest('.p-autocomplete')`, true).catch(() => false)
+    if (isAutocomplete) {
+      const typed = await this.typeInto(index, String(value))
+      return {
+        ok: typed.ok,
+        note: typed.ok ? `Введено с клавиатуры: «${typed.value}»` : `Не удалось ввести значение (в поле «${typed.value}»)`,
+        field: before,
+        before: before.value,
+        after: typed.value,
+        verified: typed.ok,
+      }
+    }
+
     const isSelect = String(before.tag) === 'select'
     const result = (await this.ev(win, 
       isSelect
@@ -1195,27 +1210,16 @@ export class BrowserAutomation {
     const target = String(value).trim()
     const readValue = async () => String((await this.ev(win, `(${FIELD_BY_INDEX(index)}).value`, true)) ?? '')
 
-    // 1. Прямой ввод в поле.
-    await this.ev(
-      win,
-      String.raw`(() => {
-        const el = ${FIELD_BY_INDEX(index)}
-        el.focus()
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-        setter ? setter.call(el, ${JSON.stringify(target)}) : (el.value = ${JSON.stringify(target)})
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(target)} }))
-        el.dispatchEvent(new Event('change', { bubbles: true }))
-        for (const type of ['keydown', 'keyup']) {
-          el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
-        }
-        el.blur()
-        return el.value
-      })()`,
-      true,
-    )
-    await new Promise((r) => setTimeout(r, 500))
+    // 1. Ввод как человек (доверенные события): PrimeNG-календарь парсит строку.
+    const typed = await this.typeInto(index, target)
+    await this.pressKey('Enter').catch(() => undefined)
+    await this.ev(win, `(() => { const el = ${FIELD_BY_INDEX(index)}; el.blur(); return true })()`, true).catch(() => undefined)
+    await new Promise((r) => setTimeout(r, 700))
     let after = await readValue()
-    if (after === target) return { ok: true, note: `Дата введена: «${target}»` }
+    if (after === target) {
+      await this.pressKey('Escape').catch(() => undefined)
+      return { ok: true, note: `Дата введена: «${target}»` }
+    }
 
     // 2. Календарь: навигация по месяцам/десятилетиям и клик по точной дате.
     const m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/.exec(target)

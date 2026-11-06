@@ -14,6 +14,8 @@ export function buildSystemPrompt(
   const contacts = db.all<any>(`SELECT email, department, verification_status FROM contacts ORDER BY department`)
   const facts = db.all<any>(`SELECT scope, key, value FROM memory_facts ORDER BY updated_at DESC LIMIT 30`)
   const accounts = db.all<any>(`SELECT email, status FROM email_accounts`)
+  const draftRow = db.get<{ value: string }>(`SELECT value FROM kv WHERE key = 'activeDraft'`)
+  const draft = draftRow ? (JSON.parse(draftRow.value) as { id: string; step: string; url: string; at: number }) : null
   const attachments = conversationId
     ? db.all<any>(
         `SELECT a.id, a.filename, a.kind, a.size, a.created_at
@@ -37,6 +39,9 @@ export function buildSystemPrompt(
 - Почта: ${accounts.length ? accounts.map((a: any) => `${a.email} (${a.status})`).join(', ') : 'не подключена'}
 - Зрительные возможности модели: ${opts.hasVision ? 'есть (можешь анализировать изображения)' : 'нет (сообщи пользователю, если он прислал картинку)'}
 - Инструменты (tools): ${opts.hasTools ? 'доступны' : 'НЕ доступны у выбранной модели — работай только с тем, что есть в контексте'}
+
+АКТИВНЫЙ ЧЕРНОВИК: ${draft ? `релиз ${draft.id}, шаг «${draft.step}», ${draft.url} (обновлён ${new Date(draft.at).toLocaleTimeString('ru-RU')})` : 'нет'}
+${draft ? 'Продолжай именно его, не создавай новый релиз, если пользователь не попросил.' : ''}
 
 БАЗА ЗНАНИЙ BROMA 16:
 - Статей: ${kb.articles} в ${kb.categories} категориях
@@ -164,6 +169,13 @@ Best regards,
 9. Аудио: на шаге «Файлы» есть скрытый input[type=file] с accept .wav/.flac — прикрепляй WAV через account_upload_files (input_index 0).
 10. Смысл полей первого шага: «Название» — название релиза; «p-дата»/«c-дата» — годы (℗ и ©); «p-line» и «c-line» — НЕ название релиза, а название лейбла/правообладателя (например, «Music 959»), бери его из профиля: settings.labelName или settings.accountName. Если в p-line/c-line уже стоит название трека — замени на лейбл.
 11. «Тип релиза» и «Жанры» — через account_select. Для сингла исполнитель вводится на шаге «Фонограммы».
+
+ЭТАП «ФОНОГРАММЫ» (частый затык):
+- Обязательные поля: Название, Жанры, Страна создания, ISRC, Каталожный номер, Исполнитель, Лейбл.
+- ISRC и Каталожный номер: если сайт не требует ручного ввода — поставь галочки «Присвоить автоматически» (account_fill по id:isrc_checkbox / id:catalog_number_checkbox, значение true). Без них «Далее» остаётся disabled.
+- Дата создания — сегодняшняя дата (не дата релиза!); поле принимает только прошедшую/текущую дату.
+- Исполнитель: вводи как человек (account_fill сам печатает клавишами), затем нажми «+» в этой же строке (account_click по тексту/кнопке рядом), чтобы добавить исполнителя. Подсказок у поля может не быть — это нормально.
+- Если «Далее» disabled — вызови account_form_fields и проверь: пустые обязательные поля, unchecked-галочки ISRC/Каталог, пустые Жанры (токены).
 
 КАБИНЕТ BROMA 16 (проверенная структура):
 - Вход: rod.broma16.com/login (после входа редирект на rod.broma16.ru/accounts/<id>/dashboard).

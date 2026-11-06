@@ -407,6 +407,7 @@ export const TOOLS: ToolDef[] = [
       const creds = ctx.accountCredentials()
       if (creds.login && creds.password) {
         const res = await autoLogin({ browser: ctx.browser, email: ctx.email, credentials: creds }, { url, show: true })
+        rememberDraft(ctx, (await ctx.browser.read({ maxChars: 2000 })).url)
         return {
           content: [
             `Кабинет открыт. Шаги: ${res.steps.join('; ')}.`,
@@ -418,6 +419,7 @@ export const TOOLS: ToolDef[] = [
         }
       }
       const r = await ctx.browser.open(url)
+      rememberDraft(ctx, r.url)
       return {
         content: `Открыт браузер: ${r.url} («${r.title}»). Сохранённого входа нет — попроси пользователя войти в открытом окне или включить «Запоминать вход» в настройках.`,
       }
@@ -451,6 +453,7 @@ export const TOOLS: ToolDef[] = [
     parameters: obj({ max_chars: { type: 'number' } }),
     run: async (args, ctx) => {
       const r = await ctx.browser.read({ maxChars: Number(args.max_chars) || 20000 })
+      rememberDraft(ctx, r.url)
       const fields = (await ctx.browser.formFields()) as any[]
       const errors = await ctx.browser.validationErrors()
       const visible = fields.filter((f) => f.visible && f.type !== 'hidden')
@@ -552,6 +555,7 @@ export const TOOLS: ToolDef[] = [
           f.id ? `id=${f.id}` : '',
           f.required ? 'required' : '',
           f.invalid ? 'INVALID' : '',
+          f.type === 'checkbox' ? (f.checked ? 'CHECKED' : 'unchecked') : '',
           f.readOnly ? 'readonly' : '',
           `value=«${String(f.tokens?.length ? f.tokens.join(' | ') : f.value).slice(0, 30)}»`,
           f.options?.length ? `options=${JSON.stringify(f.options.slice(0, 8))}` : '',
@@ -865,6 +869,16 @@ export function isFinalSubmit(text: string): boolean {
   // «Релиз ранее уже был опубликован» — это чекбокс, а не отправка.
   if (/ранее уже был опубликован|already been released|previously released/i.test(t)) return false
   return /(отправить|отправка|на модерац\w*|submit|publish|send to|send$|опубликовать|загрузить на модерац\w*)/i.test(t)
+}
+
+/** Запоминаем, над каким черновиком идёт работа — чтобы агент не терял контекст между шагами. */
+function rememberDraft(ctx: ToolContext, url: string) {
+  const m = /\/release\/(\d+)(?:\/([a-z]+))?/i.exec(String(url || ''))
+  if (!m) return
+  ctx.db.run(
+    `INSERT INTO kv(key, value) VALUES('activeDraft', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    JSON.stringify({ id: m[1], step: m[2] || 'release', url, at: Date.now() }),
+  )
 }
 
 function stripTags(html: string) {
