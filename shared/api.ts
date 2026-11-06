@@ -17,6 +17,7 @@ import type {
   ProviderId,
   Release,
   Ticket,
+  TgSubmission,
   VisionState,
 } from './types'
 
@@ -140,6 +141,13 @@ export interface Api {
     logoutAccount(): Promise<void>
     logs(): Promise<any[]>
   }
+  submissions: {
+    list(): Promise<TgSubmission[]>
+    get(id: string): Promise<TgSubmission | null>
+    approve(id: string): Promise<{ ok: boolean; url?: string; text: string }>
+    reject(id: string): Promise<{ ok: boolean }>
+    remove(id: string): Promise<{ ok: boolean }>
+  }
   events: {
     onDelta(cb: (p: { conversationId: string; messageId: string; text: string }) => void): () => void
     onMessage(cb: (m: ChatMessage) => void): () => void
@@ -151,6 +159,7 @@ export interface Api {
     onEmailSync(cb: (p: { accountId: string }) => void): () => void
     onFollowupDue(cb: (p: { count: number; tickets: { id: string; subject: string; lastMessageAt?: number }[] }) => void): () => void
     onNotify(cb: (p: { title: string; body: string }) => void): () => void
+    onSubmissions(cb: () => void): () => void
     onNewChat(cb: () => void): () => void
   }
 }

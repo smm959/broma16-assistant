@@ -1,7 +1,7 @@
 import React from 'react'
 import type { AppBootstrap, AppSettings, Conversation, KnowledgeStatus, ProviderConnection } from '@shared/types'
 
-export type Screen = 'chat' | 'faq' | 'tickets' | 'releases' | 'email' | 'settings'
+export type Screen = 'chat' | 'inbox' | 'faq' | 'tickets' | 'releases' | 'email' | 'settings'
 
 export interface ToastItem {
   id: number

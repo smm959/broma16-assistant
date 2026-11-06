@@ -229,4 +229,27 @@ CREATE TABLE IF NOT EXISTS kv (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tg_submissions (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT,
+  username TEXT,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT 'Music 959',
+  genres TEXT NOT NULL DEFAULT '[]',
+  release_date TEXT,
+  explicit INTEGER NOT NULL DEFAULT 0,
+  author TEXT,
+  description TEXT,
+  audio_path TEXT NOT NULL,
+  audio_name TEXT,
+  cover_path TEXT NOT NULL,
+  cover_name TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER,
+  result TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tg_submissions_status ON tg_submissions(status, created_at);
 `

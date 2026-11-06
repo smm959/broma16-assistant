@@ -25,34 +25,53 @@ export interface BotReleaseResult {
   text: string
 }
 
-type Field = 'title' | 'artist' | 'label' | 'genres' | 'releaseDate' | 'explicit' | 'author' | 'audio' | 'cover' | 'confirm'
+type Field = 'title' | 'artist' | 'label' | 'genres' | 'description' | 'releaseDate' | 'explicit' | 'author' | 'audio' | 'cover' | 'confirm'
 
 interface ChatState {
   field: Field
-  data: Partial<BotReleaseSpec> & { author?: string; audioTitle?: string; coverTitle?: string }
+  data: Partial<BotReleaseSpec> & { author?: string; description?: string; audioTitle?: string; coverTitle?: string; chatId?: number; username?: string }
 }
 
 const QUESTIONS: Record<Field, string> = {
-  title: '1/9. Как называется релиз? (например: Open my eyes)',
-  artist: '2/9. Кто исполнитель? (например: ELLIWAY)',
-  label: '3/9. Какой лейбл? Отправьте «-», если Music 959.',
-  genres: '4/9. Жанры через запятую (например: Rap, Alternative Rap).',
+  title: '1/10. Как называется релиз? (например: Open my eyes)',
+  artist: '2/10. Кто исполнитель? (например: ELLIWAY)',
+  label: '3/10. Какой лейбл? Отправьте «-», если Music 959.',
+  genres: '4/10. Жанры через запятую (например: Rap, Alternative Rap).',
+  description: '5/10. Краткое описание релиза (для превью).\nЕсли не нужно — отправьте «-».',
   releaseDate:
-    '5/9. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
-  explicit: '6/9. В треке есть ненормативная лексика? Ответьте «да» или «нет».',
+    '6/10. Дата релиза в формате ДД.ММ.ГГГГ (не раньше чем через 7 дней).\nНапример: 21.11.2026',
+  explicit: '7/10. В треке есть ненормативная лексика? Ответьте «да» или «нет».',
   author:
-    '7/9. Автор слов и музыки?\nОтправьте имя и долю через запятую (например: ELLIWAY, 100).\nЕсли автор — исполнитель и доля 100%, отправьте «-».',
-  audio: '8/9. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
-  cover: '9/9. Пришлите обложку PNG 3000×3000 px (1:1, без логотипов и ссылок).',
-  confirm: 'Проверьте данные и отправьте «да», чтобы я собрал релиз в кабинете. «нет» — отменить.',
+    '8/10. Автор слов и музыки?\nОтправьте имя и долю через запятую (например: ELLIWAY, 100).\nЕсли автор — исполнитель и доля 100%, отправьте «-».',
+  audio: '9/10. Пришлите WAV-файл.\nТребования: WAV, 44100 или 48000 Гц (16/24/32 бита).\nЕсли файл больше 20 МБ, Telegram не отдаст его боту — пришлите ссылку или путь к файлу.',
+  cover: '10/10. Пришлите обложку PNG 3000×3000 px (1:1, без логотипов и ссылок).',
+  confirm: 'Проверьте данные и отправьте «да» — отправлю заявку в приложение Broma 16 Assistant на проверку. «нет» — отменить.',
 }
 
 const KEY = (chatId: number) => `tg:state:${chatId}`
 
+export interface BotSubmission {
+  chatId: number
+  username?: string
+  title: string
+  artist: string
+  label: string
+  genres: string[]
+  releaseDate: string
+  explicit: boolean
+  author: string
+  description: string
+  audioPath: string
+  audioName: string
+  coverPath: string
+  coverName: string
+}
+
 export interface BotDeps {
   db: { get<T>(sql: string, ...params: unknown[]): T | undefined; run(sql: string, ...params: unknown[]): unknown }
   dir: string
-  runRelease: (spec: BotReleaseSpec) => Promise<BotReleaseResult>
+  runRelease?: (spec: BotReleaseSpec) => Promise<BotReleaseResult>
+  saveSubmission?: (sub: BotSubmission) => Promise<BotReleaseResult>
   log: (msg: string) => void
 }
 
@@ -205,6 +224,11 @@ export class TelegramBot {
         .slice(0, 3)
       if (!genres.length) return void this.say(chatId, 'Пришлите хотя бы один жанр.')
       data.genres = genres
+      return next('description')
+    }
+
+    if (state.field === 'description') {
+      data.description = !text || text === '-' ? '' : text.slice(0, 600)
       return next('releaseDate')
     }
 
@@ -301,18 +325,34 @@ export class TelegramBot {
         return void this.say(chatId, 'Отменил. /start — заново.')
       }
       if (!/^(да|yes|ок|ok)$/i.test(text)) return void this.say(chatId, 'Отправьте «да» для сборки или «нет» для отмены.')
-      await this.say(chatId, 'Собираю релиз в кабинете… Это займёт пару минут.')
-      const spec: BotReleaseSpec = {
+      const submission = {
+        chatId,
+        username: msg.from?.username ? `@${msg.from.username}` : [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' '),
         title: data.title!,
         artist: data.artist!,
         label: data.label!,
         genres: data.genres!,
         releaseDate: data.releaseDate!,
         explicit: Boolean(data.explicit),
+        author: data.author ?? `${data.artist}, 100`,
+        description: data.description ?? '',
         audioPath: data.audioPath!,
+        audioName: data.audioTitle ?? 'audio.wav',
         coverPath: data.coverPath!,
+        coverName: data.coverTitle ?? 'cover.png',
       }
-      const res = await this.deps.runRelease(spec).catch((e) => ({ ok: false, text: String(e).slice(0, 300) }))
+      const res = this.deps.saveSubmission
+        ? await this.deps.saveSubmission(submission).catch((e) => ({ ok: false, text: String(e).slice(0, 300) }))
+        : await this.deps.runRelease!({
+            title: submission.title,
+            artist: submission.artist,
+            label: submission.label,
+            genres: submission.genres,
+            releaseDate: submission.releaseDate,
+            explicit: submission.explicit,
+            audioPath: submission.audioPath,
+            coverPath: submission.coverPath,
+          }).catch((e) => ({ ok: false, text: String(e).slice(0, 300) }))
       this.reset(chatId)
       await this.say(chatId, res.text)
       return

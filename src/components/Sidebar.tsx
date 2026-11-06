@@ -4,6 +4,7 @@ import { Icon } from './ui'
 
 const NAV = [
   { id: 'chat', icon: 'chat', label: 'Чат с агентом' },
+  { id: 'inbox', icon: 'inbox', label: 'Заявки' },
   { id: 'faq', icon: 'book', label: 'FAQ Broma 16' },
   { id: 'tickets', icon: 'ticket', label: 'Обращения' },
   { id: 'releases', icon: 'disc', label: 'Мои релизы' },

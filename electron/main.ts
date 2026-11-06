@@ -212,35 +212,38 @@ function startTelegramBot(svc: Services) {
     db: svc.db as any,
     dir: app.getPath('userData'),
     log: (m) => console.log(m),
-    runRelease: async (spec) => {
-      const st = svc.settings()
-      await autoLogin(
-        { browser: svc.browser, email: svc.email, credentials: { login: st.accountLogin ?? '', password: secrets().get('broma:password') } },
-        { url: LOGIN_URL, show: false },
-      ).catch(() => undefined)
-      const page = await svc.browser.open('https://rod.broma16.ru/release/create')
-      const wizard = new ReleaseWizard(svc.browser, () => [])
-      const res = await wizard.run({
-        title: spec.title,
-        artist: spec.artist,
-        label: spec.label,
-        genres: spec.genres,
-        type: 'Сингл',
-        releaseDate: spec.releaseDate,
-        explicit: spec.explicit,
-        audioPaths: [spec.audioPath],
-        coverPath: spec.coverPath,
-        from: 'release',
-      })
-      if (!res.ok) {
-        return {
-          ok: false,
-          text: `Остановился на шаге «${res.failure?.step}»: ${res.failure?.reason}\nЧерновик сохранён, можно поправить вручную.`,
-        }
+    saveSubmission: async (sub) => {
+      const id = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      svc.db.run(
+        `INSERT INTO tg_submissions
+         (id, chat_id, username, title, artist, label, genres, release_date, explicit, author, description,
+          audio_path, audio_name, cover_path, cover_name, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        id,
+        String(sub.chatId),
+        sub.username ?? '',
+        sub.title,
+        sub.artist,
+        sub.label,
+        JSON.stringify(sub.genres),
+        sub.releaseDate,
+        sub.explicit ? 1 : 0,
+        sub.author,
+        sub.description,
+        sub.audioPath,
+        sub.audioName,
+        sub.coverPath,
+        sub.coverName,
+        Date.now(),
+      )
+      try {
+        mainWindow?.webContents.send('submissions:changed')
+      } catch {
+        /* окно закрыто */
       }
       return {
         ok: true,
-        text: `Релиз собран и стоит на «Обзоре»: ${res.url}\nПроверьте и нажмите «Отправить на модерацию» сами — я её не трогаю.\nФайл: ${spec.audioPath.split('/').pop()}\nОбложка: ${spec.coverPath.split('/').pop()}\nДата: ${spec.releaseDate}`,
+        text: `Заявка принята ✅\n${sub.artist} — ${sub.title}\nОткрыл её в Broma 16 Assistant → «Заявки»: послушайте, посмотрите обложку и нажмите «Одобрить» или «Отклонить».`,
       }
     },
   })

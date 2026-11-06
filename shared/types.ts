@@ -293,3 +293,26 @@ export interface AppBootstrap {
   dbPath: string
   isFirstRun: boolean
 }
+
+
+export interface TgSubmission {
+  id: string
+  chatId: string
+  username: string
+  title: string
+  artist: string
+  label: string
+  genres: string[]
+  releaseDate: string | null
+  explicit: boolean
+  author: string | null
+  description: string | null
+  audioPath: string
+  audioName: string
+  coverPath: string
+  coverName: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: number
+  decidedAt: number | null
+  result: string | null
+}

@@ -6,6 +6,7 @@ import TopBar from './components/TopBar'
 import ChatScreen from './screens/ChatScreen'
 import FaqScreen from './screens/FaqScreen'
 import TicketsScreen from './screens/TicketsScreen'
+import InboxScreen from './screens/InboxScreen'
 import ReleasesScreen from './screens/ReleasesScreen'
 import EmailScreen from './screens/EmailScreen'
 import SettingsScreen from './screens/SettingsScreen'
@@ -130,6 +131,7 @@ export default function App() {
               setActivityOpen={setActivityOpen}
             />
           )}
+          {screen === 'inbox' && <InboxScreen />}
           {screen === 'faq' && <FaqScreen />}
           {screen === 'tickets' && <TicketsScreen />}
           {screen === 'releases' && <ReleasesScreen />}

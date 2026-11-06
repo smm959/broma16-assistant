@@ -19,6 +19,100 @@ export function registerIpc(svc: Services, getWindow: () => Electron.BrowserWind
     ipcMain.handle(channel, async (_e, ...args) => fn(...args))
   }
 
+  /* ------------------------------ заявки из бота ------------------------------ */
+
+  const emitSubmissions = () => {
+    try {
+      getWindow()?.webContents.send('submissions:changed')
+    } catch {
+      /* окно закрыто */
+    }
+  }
+
+  const mapSubmission = (r: any) => ({
+    id: r.id,
+    chatId: r.chat_id,
+    username: r.username,
+    title: r.title,
+    artist: r.artist,
+    label: r.label,
+    genres: JSON.parse(r.genres || '[]'),
+    releaseDate: r.release_date,
+    explicit: Boolean(r.explicit),
+    author: r.author,
+    description: r.description,
+    audioPath: r.audio_path,
+    audioName: r.audio_name,
+    coverPath: r.cover_path,
+    coverName: r.cover_name,
+    status: r.status,
+    createdAt: r.created_at,
+    decidedAt: r.decided_at,
+    result: r.result,
+  })
+
+  handle('submissions:list', () =>
+    db
+      .all<any>(
+        `SELECT * FROM tg_submissions ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 100`,
+      )
+      .map(mapSubmission),
+  )
+
+  handle('submissions:get', (id: string) => {
+    const r = db.get<any>(`SELECT * FROM tg_submissions WHERE id = ?`, id)
+    return r ? mapSubmission(r) : null
+  })
+
+  handle('submissions:reject', (id: string) => {
+    db.run(`UPDATE tg_submissions SET status = 'rejected', decided_at = ? WHERE id = ?`, Date.now(), id)
+    emitSubmissions()
+    return { ok: true }
+  })
+
+  handle('submissions:delete', (id: string) => {
+    db.run(`DELETE FROM tg_submissions WHERE id = ?`, id)
+    emitSubmissions()
+    return { ok: true }
+  })
+
+  handle('submissions:approve', async (id: string) => {
+    const row = db.get<any>(`SELECT * FROM tg_submissions WHERE id = ?`, id)
+    if (!row) return { ok: false, text: 'Заявка не найдена' }
+    const sub = mapSubmission(row)
+    const st = svc.settings()
+    await autoLogin(
+      { browser, email, credentials: { login: st.accountLogin ?? '', password: secrets().get('broma:password') } },
+      { url: LOGIN_URL, show: false },
+    ).catch(() => undefined)
+    await browser.open('https://rod.broma16.ru/release/create')
+    const wizard = new ReleaseWizard(browser, () => [])
+    const res = await wizard.run({
+      title: sub.title,
+      artist: sub.artist,
+      label: sub.label,
+      genres: sub.genres,
+      type: 'Сингл',
+      releaseDate: sub.releaseDate ?? undefined,
+      explicit: sub.explicit,
+      audioPaths: [sub.audioPath],
+      coverPath: sub.coverPath,
+      from: 'release',
+    })
+    db.run(
+      `UPDATE tg_submissions SET status = 'approved', decided_at = ?, result = ? WHERE id = ?`,
+      Date.now(),
+      res.ok ? `Обзор: ${res.url}` : `Ошибка на шаге ${res.failure?.step}: ${res.failure?.reason}`,
+      id,
+    )
+    emitSubmissions()
+    return {
+      ok: res.ok,
+      url: res.url,
+      text: res.ok ? `Готово: ${res.url}` : `Остановился на шаге «${res.failure?.step}»: ${res.failure?.reason}`,
+    }
+  })
+
   /* -------------------------------- bootstrap -------------------------------- */
 
   handle('app:bootstrap', () => {

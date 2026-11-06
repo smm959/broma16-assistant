@@ -122,6 +122,13 @@ const api = {
     logoutAccount: () => invoke('system:logoutAccount'),
     logs: () => invoke('system:logs'),
   },
+  submissions: {
+    list: () => invoke('submissions:list'),
+    get: (id: string) => invoke('submissions:get', id),
+    approve: (id: string) => invoke('submissions:approve', id),
+    reject: (id: string) => invoke('submissions:reject', id),
+    remove: (id: string) => invoke('submissions:delete', id),
+  },
   events: {
     onDelta: on('event:delta'),
     onMessage: on('event:message'),
@@ -134,6 +141,7 @@ const api = {
     onNewChat: on('event:new-chat'),
     onFollowupDue: on('event:followup-due'),
     onNotify: on('event:notify'),
+    onSubmissions: on('submissions:changed'),
   },
 }
 
